@@ -2,7 +2,7 @@
 
 -- DROP DATABASE IF EXISTS "Proyecto_Gimnasio_Ortiz_Oto";
 
-CREATE DATABASE "Proyecto_Gimnasio_Ortiz_Oto"
+CREATE DATABASE "Gimnasio_Ortiz_Oto"
     WITH
     OWNER = postgres
     ENCODING = 'UTF8'
@@ -11,4 +11,5 @@ CREATE DATABASE "Proyecto_Gimnasio_Ortiz_Oto"
     LOCALE_PROVIDER = 'libc'
     TABLESPACE = pg_default
     CONNECTION LIMIT = -1
+
     IS_TEMPLATE = False;
