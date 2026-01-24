@@ -248,7 +248,7 @@ GRANT SELECT, INSERT, UPDATE ON evaluacion_nutricional TO rol_nutricionista;
 GRANT SELECT, INSERT, UPDATE ON dieta TO rol_nutricionista;
 GRANT SELECT ON nutricionista TO rol_nutricionista;
 
--- ROL CLIENTE (tu info)
+-- ROL CLIENTE (para ver nuestra info como clientes)
 GRANT SELECT ON cliente TO rol_cliente;
 GRANT SELECT ON inscripcion_membresia TO rol_cliente;
 GRANT SELECT ON rutina TO rol_cliente;
@@ -259,3 +259,34 @@ GRANT SELECT ON dieta TO rol_cliente;
 GRANT SELECT ON factura TO rol_cliente;
 GRANT SELECT ON pago TO rol_cliente;
 
+/*USUARIOS*/
+-- Usuarios administradores
+CREATE USER admin_gimnasio WITH PASSWORD 'admin1234';
+GRANT rol_administrador TO admin_gimnasio;
+
+-- Usuarios entrenadores (Varios) 
+CREATE USER entrenador_andres WITH PASSWORD 'AndresGym123';
+GRANT rol_entrenador TO entrenador_andres;
+
+CREATE USER entrenador_gelen WITH PASSWORD 'GelenFit123';
+GRANT rol_entrenador TO entrenador_gelen;
+
+CREATE USER entrenador_denisse WITH PASSWORD 'vuelveDenisse2026';
+GRANT rol_entrenador TO entrenador_denisse;
+
+CREATE USER entrenador_max WITH PASSWORD 'MaxGym333';
+GRANT rol_entrenador TO entrenador_max;
+
+-- RECPCIONISTAS
+CREATE USER recepcion_danahe_dia WITH PASSWORD 'RecepcionDia123';
+GRANT rol_recepcionista TO recepcion_danahe_dia;
+
+CREATE USER recepcion_gustavo_noche WITH PASSWORD 'RecepcionNoche123';
+GRANT rol_recepcionista TO recepcion_gustavo_noche;
+
+--NUTRICIONISTA
+CREATE USER nutri_lucia WITH PASSWORD 'LuciaNutri123';
+GRANT rol_nutricionista TO nutri_lucia;
+
+CREATE USER nutri_ricardo WITH PASSWORD 'RicardoSalud';
+GRANT rol_nutricionista TO nutri_ricardo;
