@@ -1,17 +1,16 @@
--- Database: Proyecto_Gimnasio_Ortiz_Oto
+-- Database: Gimnasio_Ortiz_Oto
 
--- DROP DATABASE IF EXISTS "Proyecto_Gimnasio_Ortiz_Oto";
+-- DROP DATABASE IF EXISTS "Gimnasio_Ortiz_Oto";
 
 CREATE DATABASE "Gimnasio_Ortiz_Oto"
     WITH
     OWNER = postgres
     ENCODING = 'UTF8'
-    LC_COLLATE = 'Spanish_Ecuador.1252'
-    LC_CTYPE = 'Spanish_Ecuador.1252'
+    LC_COLLATE = 'Spanish_Mexico.1252'
+    LC_CTYPE = 'Spanish_Mexico.1252'
     LOCALE_PROVIDER = 'libc'
     TABLESPACE = pg_default
     CONNECTION LIMIT = -1
-
     IS_TEMPLATE = False;
 
 /*TABLAS*/
@@ -158,6 +157,66 @@ CREATE TABLE pago (
     FOREIGN KEY (id_factura) REFERENCES factura(id_factura)
 );
 
+INSERT INTO cliente (nombre, cedula, telefono, email, fecha_registro) VALUES
+('Camilo Rodriguez', '1754678976', '0989564352', 'camiRodriguez@gmail.com', '2025-08-15'),
+('Emilia González', '1765435632', '0987654321', 'emiliaGonzalez@gmail.com', '2025-08-20'),
+('Carlos Ruiz', '1789095643', '0976543210', 'carlosRuiz@gmail.com', '2025-08-23'),
+('Ana Silva', '1756432318', '0965490109', 'anaSilva@gmail.com', '2025-08-25'),
+('Luis Castro', '1789564356', '0967321997', 'luisCastro@gmail.com', '2025-08-25'),
+('Patricia Torres', '1756895432', '0943289980', 'patriciaTorres@gmail.com', '2025-09-15'),
+('Eliana Flores', '1767546832', '0965109876', 'elianaFlores@gmail.com', '2025-09-22'),
+('Laura Vega', '1789075643', '0921228765', 'lauraVega@gmail.com', '2025-10-06'),
+('Diego Vargas', '1789765432', '0967047654', 'diegoVargas@gmail.com', '2025-10-14'),
+('Sofía Méndez', '1789075643', '0977876543', 'sofiaMendez@gmail.com', '2025-10-24'),
+('Fernando Reyes', '1789364251', '0908760532', 'fernandoReyes@gmail.com', '2025-10-25'),
+('Valentina Sánchez', '1789564321', '0907654321', 'valentinaSanchez@gmail.com', '2025-11-08'),
+('Miguel Ramos', '1789564352', '0996543210', 'miguelRamos@gmail.com', '2025-11-10'),
+('Enrique Guerrero', '1767548943', '0935432169', 'enriqueGuerrero@gmail.com', '2025-11-15');
+
+INSERT INTO membresia (nombre, duracion_meses, precio, descripcion) VALUES
+('Básica', 1, 35.00, 'Acceso a todas las áreas del gimnasio en horario normal sin entrenador'),
+('Estándar', 3, 90.00, 'Acceso completo al gimnasio + 2 clases de spinning o yoga por semana + descuento en productos del gym.'),
+('Premium', 6, 165.00, 'Acceso total + clases grupales ilimitadas (spinning, yoga, zumba, boxeo) + 1 sesión mensual con entrenador personal.'),
+('VIP', 12, 300.00, 'Acceso total VIP + entrenador personal diario + plan nutricional personalizado + clases grupales ilimitadas + toalla y bebida incluidas'),
+('Estudiante', 1, 25.00, 'Membresía especial para estudiantes con carnet vigente'),
+('Pareja', 3, 150.00, 'Membresía compartida para 2 personas + 4 clases grupales combinadas al mes.');
+
+INSERT INTO inscripcion_membresia (id_cliente, id_membresia, fecha_inicio, fecha_fin, estado) VALUES
+(1, 4, '2025-08-15', '2026-08-15', 'Activa'),
+(2, 3, '2025-08-20', '2026-02-20', 'Activa'),
+(3, 2, '2025-08-23', '2025-11-23', 'Activa'),
+(4, 3, '2025-08-25', '2026-02-25', 'Activa'),
+(5, 1, '2025-08-25', '2025-09-25', 'Expirada'),
+(6, 4, '2025-09-15', '2026-09-15', 'Activa'),
+(7, 2, '2025-09-22', '2025-12-22', 'Activa'),
+(8, 3, '2025-10-06', '2026-04-06', 'Activa'),
+(9, 1, '2025-10-14', '2025-11-14', 'Expirada'),
+(10, 4, '2025-10-24', '2026-10-24', 'Activa'),
+(11, 2, '2025-10-25', '2026-01-25', 'Activa'),
+(12, 1, '2025-11-08', '2025-12-08', 'Activa'),
+(13, 5, '2025-11-10', '2025-12-10', 'Activa'),
+(14, 3, '2025-11-15', '2026-05-15', 'Activa'),
+(3, 4, '2025-12-23', '2026-12-23', 'Activa'),
+(5, 6, '2025-10-01', '2026-01-01', 'Activa');
+
+INSERT INTO entrenador (nombre, especialidad, telefono) VALUES
+('Andres Oto', 'Fuerza y Acondicionamiento', '0967234577'),
+('Gelen Ortiz', 'Pérdida de Peso', '0992345678'),
+('Dennise Proaño', 'Hipertrofia Muscular', '0993146759'),
+('Max Rojas', 'Rehabilitación y Prevención', '0912581290');
+
+INSERT INTO rutina (nombre, nivel, objetivo, id_cliente, id_entrenador) VALUES
+('Rutina de Fuerza Total', 'Avanzado', 'Aumentar fuerza máxima de grupos musculares', 1, 1),
+('Plan de Pérdida de Grasa', 'Intermedio', 'Reducir porcentaje de grasa corporal', 2, 2),
+('Hipertrofia 4 Días', 'Intermedio', 'Ganancia de masa muscular', 3, 3),
+('Rehabilitación Rodilla', 'Principiante', 'Fortalecer rodilla tras lesión', 4, 4),
+('Bienestar General', 'Principiante', 'Mejorar condición física general', 5, 1),
+('Full Body', 'Principiante', 'Adaptación al ejercicio', 6, 1),
+('Push Pull Legs', 'Avanzado', 'Hipertrofia muscular avanzada', 10, 3),
+('Cardio y Tonificación', 'Intermedio', 'Resistencia cardiovascular y tono muscular', 8, 2),
+('Fuerza Funcional', 'Intermedio', 'Mejorar movimientos cotidianos', 11, 1),
+('Definición Muscular', 'Avanzado', 'Marcar y definir musculatura', 1, 3);
+
 -- Insertar ejercicios con grupos musculares
 INSERT INTO ejercicio (nombre, grupo_muscular, descripcion) VALUES
 -- PECHO
@@ -166,50 +225,154 @@ INSERT INTO ejercicio (nombre, grupo_muscular, descripcion) VALUES
 ('Aperturas con mancuernas', 'Pecho', 'Aislamiento de pectorales para definición'),
 ('Flexiones', 'Pecho', 'Ejercicio con peso corporal para pecho y tríceps'),
 ('Press inclinado', 'Pecho', 'Enfocado en porción superior del pectoral'),
-
 -- ESPALDA
 ('Dominadas', 'Espalda', 'Ejercicio fundamental para espalda ancha'),
 ('Remo con barra', 'Espalda', 'Para desarrollo de espesor en espalda'),
 ('Peso muerto', 'Espalda', 'Ejercicio compuesto para espalda baja y piernas'),
 ('Jalón al pecho', 'Espalda', 'Para amplitud de espalda en máquina'),
 ('Remo con mancuerna', 'Espalda', 'Ejercicio unilateral para equilibrio muscular'),
-
 -- HOMBROS
 ('Press militar', 'Hombros', 'Ejercicio básico para desarrollo de hombros'),
 ('Elevaciones laterales', 'Hombros', 'Para desarrollo de deltoides laterales'),
 ('Face Pull', 'Hombros', 'Para salud articular y rotadores externos'),
 ('Press Arnold', 'Hombros', 'Variación con rotación para mayor activación'),
 ('Encogimientos de hombros', 'Hombros', 'Para desarrollo de trapecio superior'),
-
 -- PIERNAS
 ('Sentadillas', 'Piernas', 'Ejercicio fundamental para desarrollo de piernas'),
 ('Prensa de piernas', 'Piernas', 'Para fuerza en piernas con soporte de espalda'),
 ('Extensiones de cuádriceps', 'Piernas', 'Aislamiento para parte frontal del muslo'),
 ('Curl femoral', 'Piernas', 'Para isquiotibiales (parte posterior del muslo)'),
 ('Peso muerto rumano', 'Piernas', 'Para femoral, glúteos y espalda baja'),
-
 -- BRAZOS
 ('Curl de bíceps con barra', 'Brazos', 'Ejercicio básico para desarrollo de bíceps'),
 ('Fondos en paralelas', 'Brazos', 'Para tríceps y porción inferior del pecho'),
 ('Extensión de tríceps en polea', 'Brazos', 'Aislamiento para tríceps con tensión constante'),
 ('Curl martillo', 'Brazos', 'Para braquial y antebrazo, con agarre neutral'),
 ('Press francés', 'Brazos', 'Para cabeza larga del tríceps'),
-
 -- ABDOMEN
 ('Crunch', 'Abdomen', 'Para recto abdominal (six-pack)'),
 ('Plancha', 'Abdomen', 'Para core completo y estabilidad'),
 ('Elevaciones de piernas', 'Abdomen', 'Para abdominales inferiores'),
 ('Russian Twist', 'Abdomen', 'Para oblicuos y rotación del core'),
-
 -- CARDIO
 ('Correr en cinta', 'Cardio', 'Cardiovascular de impacto para resistencia'),
 ('Bicicleta estática', 'Cardio', 'Cardio de bajo impacto para piernas'),
 ('Elíptica', 'Cardio', 'Cardio completo de bajo impacto'),
-
 -- FULL BODY
 ('Burpees', 'Full Body', 'Ejercicio completo de fuerza y cardio'),
 ('Clean and Press', 'Full Body', 'Ejercicio olímpico completo'),
 ('Thruster', 'Full Body', 'Combinación de sentadilla y press');
+
+
+INSERT INTO rutina_ejercicio (id_rutina, id_ejercicio, series, repeticiones, descanso) VALUES
+-- Rutina 1: Fuerza Total (Avanzado)
+(1, 1, 5, '5', 180),      
+(1, 16, 5, '5', 180),     
+(1, 8, 4, '6', 180),      
+(1, 11, 4, '6', 120),     
+
+-- Rutina 2: Pérdida de Grasa (Intermedio)
+(2, 33, 4, '15', 30),     
+(2, 30, 1, '20 min', 0),  
+(2, 26, 3, '60 seg', 30), 
+(2, 31, 1, '15 min', 0),  
+
+-- Rutina 3: Hipertrofia 4 Días (Intermedio)
+(3, 1, 4, '8-10', 90),    
+(3, 5, 3, '10-12', 90),   
+(3, 16, 4, '10-12', 90),  
+(3, 18, 4, '12-15', 60),  
+
+-- Rutina 4: Rehabilitación Rodilla (Principiante)
+(4, 17, 3, '10', 60),     
+(4, 31, 1, '15 min', 0),  
+(4, 26, 2, '30 seg', 30), 
+
+-- Rutina 5: Bienestar general del cuerpo (Principiante)
+(5, 16, 3, '12', 60),     
+(5, 6, 3, '8-10', 90),    
+(5, 26, 3, '30 seg', 30), 
+(5, 30, 1, '15 min', 0),  
+
+-- Rutina 6: Full Body (Principiante)
+(6, 16, 3, '10', 90),    
+(6, 1, 3, '10', 90),      
+(6, 7, 3, '10', 90),     
+(6, 25, 3, '15', 60),     
+
+-- Rutina 7: Push Pull Legs (Avanzado)
+(7, 1, 4, '6-8', 120),    
+(7, 5, 4, '8-10', 90),   
+(7, 11, 4, '8-10', 90),   
+(7, 6, 4, '6-8', 120),    
+(7, 16, 5, '8-10', 120),  
+
+-- Rutina 8: Cardio y Tonificación (Intermedio)
+(8, 30, 1, '25 min', 0),  
+(8, 33, 3, '12', 45),     
+(8, 32, 1, '15 min', 0),  
+(8, 29, 3, '20', 45),     
+
+-- Rutina 9: Fuerza Funcional (Intermedio)
+(9, 8, 4, '5', 150),      
+(9, 16, 4, '8', 120),     
+(9, 33, 3, '10', 60),     
+(9, 35, 3, '8', 120),     
+
+-- Rutina 10: Definición Muscular (Avanzado)
+(10, 1, 4, '12-15', 60), 
+(10, 5, 4, '12-15', 60),  
+(10, 12, 3, '15', 45),    
+(10, 21, 3, '15', 45);    
+
+
+INSERT INTO nutricionista (nombre, especialidad, telefono) VALUES
+('Dr. Lucia Martinez', 'Especialista en nutrición deportiva y clínica', '0987674321'),
+('Dra. Ricardo Herrera', 'Especialista en nutrición deportiva y clínica', '0914103890');
+
+INSERT INTO evaluacion_nutricional (id_cliente, id_nutricionista, peso, altura, imc, objetivo, recomendaciones, fecha) VALUES
+(1, 2, 85.5, 1.78, 27.0, 'Ganancia de masa muscular', 'Aumentar ingesta calórica en 500 kcal. Proteína: 2g/kg. Entrenar 4-5 veces/semana.', '2025-08-20'),
+(2, 1, 72.3, 1.65, 26.6, 'Pérdida de grasa', 'Déficit calórico de 300 kcal. Cardio 3 veces/semana. Hidratación constante.', '2025-08-25'),
+(3, 2, 68.0, 1.72, 23.0, 'Aumento de masa muscular', 'Superávit de 400 kcal. Proteína alta. Descanso adecuado.', '2025-08-28'),
+(4, 1, 58.5, 1.60, 22.9, 'Mantener peso saludable', 'Dieta balanceada. Ejercicio regular 3-4 veces/semana.', '2025-09-01'),
+(5, 1, 90.2, 1.75, 29.4, 'Reducción de peso', 'Déficit de 500 kcal. Eliminar azúcares añadidos. Caminar 30 min diarios.', '2025-09-05'),
+(6, 2, 75.0, 1.70, 26.0, 'Ganancia muscular', 'Dieta hipercalórica. Proteína 2.2g/kg. Carbohidratos complejos.', '2025-09-20'),
+(8, 1, 63.0, 1.68, 22.3, 'Tonificación', 'Dieta normocalórica. Balance de macros. Ejercicio mixto.', '2025-10-10'),
+(10, 2, 78.5, 1.76, 25.3, 'Hipertrofia', 'Superávit moderado. Timing de nutrientes. Suplementación básica.', '2025-10-28'),
+(11, 1, 88.0, 1.73, 29.4, 'Pérdida de grasa', 'Déficit calórico gradual. Aumentar actividad física. Controlar porciones.', '2025-11-01'),
+(1, 2, 87.0, 1.78, 27.5, 'Mantenimiento y definición', 'Mantener superávit leve. Ajustar macros según progreso.', '2025-09-15');
+
+INSERT INTO dieta (id_evaluacion, descripcion, calorias_diarias) VALUES
+(1, 'Desayuno: Avena con frutas y proteína. Almuerzo: Pollo con arroz y vegetales. Cena: Pescado con ensalada. Snacks: Frutos secos y batido proteico.', 3200),
+(2, 'Desayuno: Huevos con espinaca. Almuerzo: Ensalada con atún. Cena: Pechuga a la plancha con brócoli. Snacks: Yogurt griego.', 1800),
+(3, 'Desayuno: Batido proteico con avena. Almuerzo: Carne magra con quinoa. Cena: Salmón con vegetales. Snacks: Frutas y almendras.', 2800),
+(4, 'Desayuno: Tostadas integrales con aguacate. Almuerzo: Pasta integral con vegetales. Cena: Pollo al horno. Snacks: Frutas frescas.', 2000),
+(5, 'Desayuno: Claras de huevo con vegetales. Almuerzo: Ensalada completa con proteína. Cena: Pescado al vapor con espárragos. Snacks: Vegetales crudos.', 1600),
+(6, 'Desayuno: Pancakes proteicos. Almuerzo: Arroz con carne y vegetales. Cena: Pasta con atún. Snacks: Batido de proteína y banana.', 3000),
+(7, 'Desayuno: Yogurt con granola. Almuerzo: Pollo con batata. Cena: Ensalada de quinoa. Snacks: Frutas y nueces.', 2200),
+(8, 'Desayuno: Avena proteica. Almuerzo: Res con arroz integral. Cena: Pavo con vegetales. Snacks: Batidos y frutos secos.', 2900),
+(9, 'Desayuno: Huevos revueltos light. Almuerzo: Pescado con ensalada. Cena: Pollo con verduras al vapor. Snacks: Gelatina y té verde.', 1700),
+(10, 'Desayuno: Batido verde con proteína. Almuerzo: Pechuga con arroz integral. Cena: Atún con quinoa. Snacks: Frutas y proteína.', 2600);
+
+INSERT INTO pago (id_factura, fecha_pago, monto, metodo_pago) VALUES
+(1, '2025-08-15 10:35:00', 300.00, 'Tarjeta Crédito'),
+(2, '2025-08-20 14:20:00', 165.00, 'Transferencia Bancaria'),
+(3, '2025-08-23 09:50:00', 90.00, 'Efectivo'),
+(4, '2025-08-25 16:25:00', 165.00, 'Tarjeta Débito'),
+(5, '2025-08-25 11:05:00', 35.00, 'Efectivo'),
+(6, '2025-09-15 13:35:00', 150.00, 'Tarjeta Crédito'),
+(6, '2025-10-15 10:00:00', 150.00, 'Transferencia Bancaria'),
+(7, '2025-09-22 10:05:00', 90.00, 'Efectivo'),
+(8, '2025-10-06 15:50:00', 165.00, 'Débito Automático'),
+(9, '2025-10-14 12:20:00', 35.00, 'Efectivo'),
+(10, '2025-10-24 09:35:00', 300.00, 'Tarjeta Crédito'),
+(11, '2025-10-25 14:05:00', 90.00, 'Transferencia Bancaria'),
+(12, '2025-11-08 11:35:00', 35.00, 'Efectivo'),
+(13, '2025-11-10 10:20:00', 25.00, 'Efectivo'),
+(14, '2025-11-15 16:50:00', 165.00, 'Tarjeta Débito'),
+(15, '2025-12-23 10:10:00', 300.00, 'Tarjeta Crédito'),
+(16, '2025-10-01 15:35:00', 150.00, 'Efectivo'),
+(17, '2025-09-15 12:05:00', 50.00, 'Tarjeta Débito');
 
 -- 5. Administración y seguridad
 --CREAMOS ROLES
@@ -290,3 +453,4 @@ GRANT rol_nutricionista TO nutri_lucia;
 
 CREATE USER nutri_ricardo WITH PASSWORD 'RicardoSalud';
 GRANT rol_nutricionista TO nutri_ricardo;
+
