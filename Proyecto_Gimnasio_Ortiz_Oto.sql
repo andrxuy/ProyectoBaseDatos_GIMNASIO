@@ -55,7 +55,7 @@ CREATE TABLE entrenador (
         'Pérdida de Peso',
         'Hipertrofia Muscular',
         'Rehabilitación y Prevención',
-        'Salud y Bienestar General'
+        'Salud y Bienestar General',
     )),
     telefono VARCHAR(20)
 );
@@ -104,7 +104,8 @@ CREATE TABLE nutricionista (
         'Pérdida de Peso',
         'Hipertrofia Muscular',
         'Rehabilitación y Prevención',
-        'Salud y Bienestar General'
+        'Salud y Bienestar General',
+        'Especialista en nutrición deportiva y clínica'	
     )),
     telefono VARCHAR(20)
 );
@@ -148,7 +149,7 @@ CREATE TABLE pago (
     id_factura INT NOT NULL,
     fecha_pago TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     monto DECIMAL(12,2) CHECK (monto > 0),
-    metodo_pago VARCHAR(70) DEFAULT 'Efectivo' CHECK (metodo_pago IN (
+    metodo_pago VARCHAR(30) DEFAULT 'Efectivo' CHECK (metodo_pago IN (
         'Efectivo',
         'Tarjeta Débito',
         'Tarjeta Crédito',
@@ -341,8 +342,8 @@ INSERT INTO rutina_ejercicio (id_rutina, id_ejercicio, series, repeticiones, des
 
 
 INSERT INTO nutricionista (nombre, especialidad, telefono) VALUES
-('Dr. Lucia Martinez', 'Pérdida de Peso', '0987674321'),
-('Dra. Ricardo Herrera', 'Hipertrofia Muscular', '0914103890');
+('Dr. Lucia Martinez', 'Especialista en nutrición deportiva y clínica', '0987674321'),
+('Dra. Ricardo Herrera', 'Especialista en nutrición deportiva y clínica', '0914103890');
 
 select*from evaluacion_nutricional;
 
@@ -1022,4 +1023,5 @@ WHERE estado <> 'Cancelada';
 
 /*
 */
+
 
