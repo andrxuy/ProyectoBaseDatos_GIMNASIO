@@ -103,7 +103,8 @@ CREATE TABLE nutricionista (
         'Pérdida de Peso',
         'Hipertrofia Muscular',
         'Rehabilitación y Prevención',
-        'Salud y Bienestar General'
+        'Salud y Bienestar General',
+		'Especialista en nutrición deportiva y clínica'
     )),
     telefono VARCHAR(20)
 );
@@ -147,7 +148,7 @@ CREATE TABLE pago (
     id_factura INT NOT NULL,
     fecha_pago TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     monto DECIMAL(12,2) CHECK (monto > 0),
-    metodo_pago VARCHAR(20) DEFAULT 'Efectivo' CHECK (metodo_pago IN (
+    metodo_pago VARCHAR(30) DEFAULT 'Efectivo' CHECK (metodo_pago IN (
         'Efectivo',
         'Tarjeta Débito',
         'Tarjeta Crédito',
@@ -157,6 +158,8 @@ CREATE TABLE pago (
     FOREIGN KEY (id_factura) REFERENCES factura(id_factura)
 );
 
+DROP TABLE pago;
+
 INSERT INTO cliente (nombre, cedula, telefono, email, fecha_registro) VALUES
 ('Camilo Rodriguez', '1754678976', '0989564352', 'camiRodriguez@gmail.com', '2025-08-15'),
 ('Emilia González', '1765435632', '0987654321', 'emiliaGonzalez@gmail.com', '2025-08-20'),
@@ -165,7 +168,7 @@ INSERT INTO cliente (nombre, cedula, telefono, email, fecha_registro) VALUES
 ('Luis Castro', '1789564356', '0967321997', 'luisCastro@gmail.com', '2025-08-25'),
 ('Patricia Torres', '1756895432', '0943289980', 'patriciaTorres@gmail.com', '2025-09-15'),
 ('Eliana Flores', '1767546832', '0965109876', 'elianaFlores@gmail.com', '2025-09-22'),
-('Laura Vega', '1789075643', '0921228765', 'lauraVega@gmail.com', '2025-10-06'),
+('Laura Vega', '1743786531', '0921228765', 'lauraVega@gmail.com', '2025-10-06'),
 ('Diego Vargas', '1789765432', '0967047654', 'diegoVargas@gmail.com', '2025-10-14'),
 ('Sofía Méndez', '1789075643', '0977876543', 'sofiaMendez@gmail.com', '2025-10-24'),
 ('Fernando Reyes', '1789364251', '0908760532', 'fernandoReyes@gmail.com', '2025-10-25'),
@@ -354,6 +357,25 @@ INSERT INTO dieta (id_evaluacion, descripcion, calorias_diarias) VALUES
 (9, 'Desayuno: Huevos revueltos light. Almuerzo: Pescado con ensalada. Cena: Pollo con verduras al vapor. Snacks: Gelatina y té verde.', 1700),
 (10, 'Desayuno: Batido verde con proteína. Almuerzo: Pechuga con arroz integral. Cena: Atún con quinoa. Snacks: Frutas y proteína.', 2600);
 
+INSERT INTO factura (id_cliente, fecha, total) VALUES
+(1, '2025-08-15 10:30:00', 300.00),
+(2, '2025-08-20 14:15:00', 165.00),
+(3, '2025-08-23 09:45:00', 90.00),
+(4, '2025-08-25 16:20:00', 165.00),
+(5, '2025-08-25 11:00:00', 35.00),
+(6, '2025-09-15 13:30:00', 300.00),
+(7, '2025-09-22 10:00:00', 90.00),
+(8, '2025-10-06 15:45:00', 165.00),
+(9, '2025-10-14 12:15:00', 35.00),
+(10, '2025-10-24 09:30:00', 300.00),
+(11, '2025-10-25 14:00:00', 90.00),
+(12, '2025-11-08 11:30:00', 35.00),
+(13, '2025-11-10 10:15:00', 25.00),
+(14, '2025-11-15 16:45:00', 165.00),
+(3, '2025-12-23 10:00:00', 300.00),
+(5, '2025-10-01 15:30:00', 150.00),
+(1, '2025-09-15 12:00:00', 50.00);
+
 INSERT INTO pago (id_factura, fecha_pago, monto, metodo_pago) VALUES
 (1, '2025-08-15 10:35:00', 300.00, 'Tarjeta Crédito'),
 (2, '2025-08-20 14:20:00', 165.00, 'Transferencia Bancaria'),
@@ -373,6 +395,206 @@ INSERT INTO pago (id_factura, fecha_pago, monto, metodo_pago) VALUES
 (15, '2025-12-23 10:10:00', 300.00, 'Tarjeta Crédito'),
 (16, '2025-10-01 15:35:00', 150.00, 'Efectivo'),
 (17, '2025-09-15 12:05:00', 50.00, 'Tarjeta Débito');
+
+-- 4. Consultas y operaciones
+-- Clientes con el estado de su membresía
+SELECT c.nombre AS cliente,
+       i.estado,
+       i.fecha_inicio,
+       i.fecha_fin
+FROM cliente c
+INNER JOIN inscripcion_membresia i
+ON c.id_cliente = i.id_cliente;
+
+-- Rutinas completas con entrenador 
+SELECT c.nombre AS cliente,
+       r.nombre AS rutina, 
+       r.nivel, 
+       r.objetivo,
+       e.nombre AS entrenador
+FROM cliente c
+INNER JOIN rutina r ON c.id_cliente = r.id_cliente
+LEFT JOIN entrenador e ON r.id_entrenador = e.id_entrenador;
+
+-- Clientes con membresías próximas a expirar
+SELECT c.nombre,
+       im.fecha_fin
+FROM cliente c
+JOIN inscripcion_membresia im ON c.id_cliente = im.id_cliente
+WHERE im.estado = 'Activa'
+  AND im.fecha_fin <= CURRENT_DATE + INTERVAL '30 days'
+ORDER BY im.fecha_fin;
+
+-- Rutinas que han sido asignadas a los clientes con su respectivo entrenador
+SELECT c.nombre AS cliente,
+       r.nombre AS rutina,
+       r.nivel,
+       e.nombre AS entrenador
+FROM cliente c
+JOIN rutina r ON c.id_cliente = r.id_cliente
+LEFT JOIN entrenador e ON r.id_entrenador = e.id_entrenador
+ORDER BY e.nombre;
+
+
+-- Clientes activos en el gimnasio
+CREATE VIEW vista_clientes_activos AS
+SELECT c.nombre,
+       m.nombre AS membresia,
+       im.fecha_fin
+FROM cliente c
+JOIN inscripcion_membresia im ON c.id_cliente = im.id_cliente
+JOIN membresia m ON im.id_membresia = m.id_membresia
+WHERE im.estado = 'Activa';
+
+SELECT * FROM vista_clientes_activos;
+
+-- Clientes que pueden ingresar desde el día de hoy 
+SELECT c.nombre,
+		im.fecha_fin
+FROM cliente c
+JOIN inscripcion_membresia im ON c.id_cliente = im.id_cliente
+WHERE im.estado = 'Activa'
+  AND im.fecha_fin >= CURRENT_DATE;
+  
+-- Estadísticas gimnasio 
+SELECT 
+    date_trunc('month', f.fecha) AS mes,
+    COUNT(DISTINCT f.id_cliente) AS clientes_facturados,
+    COUNT(f.id_factura) AS total_facturas,
+    SUM(f.total) AS ingresos_totales,
+    MIN(f.total) AS factura_minima,
+    MAX(f.total) AS factura_maxima
+FROM factura f
+WHERE f.fecha >= CURRENT_DATE - INTERVAL '12 months'
+GROUP BY date_trunc('month', f.fecha)
+ORDER BY mes DESC;
+
+-- Clientes con más de una factura
+SELECT nombre
+FROM cliente
+WHERE id_cliente IN (
+    SELECT id_cliente
+    FROM factura
+    GROUP BY id_cliente
+    HAVING COUNT(*) > 1
+);
+-- Total pagado por cliente hasta el momento
+SELECT c.nombre, 
+SUM(p.monto) AS total_pagado
+FROM cliente c
+JOIN factura f ON c.id_cliente = f.id_cliente
+JOIN pago p ON f.id_factura = p.id_factura
+GROUP BY c.nombre;
+
+-- VISTA DE CLIENTES CON RUTINA Y FECHAS DE INSCRIPCION- FINALIZACIÓN
+CREATE VIEW vista_clientes_rutina AS
+SELECT c.nombre AS cliente, 
+		r.nombre AS rutina, 
+		e.nombre AS entrenador,
+		im.fecha_inicio,
+		im.fecha_fin
+FROM cliente c
+JOIN rutina r ON c.id_cliente = r.id_cliente
+LEFT JOIN entrenador e ON r.id_entrenador = e.id_entrenador
+JOIN inscripcion_membresia im ON c.id_cliente = im.id_cliente;
+
+-- Ejemplo: Actualizar el estado activo considerando la fecha actual 
+UPDATE inscripcion_membresia
+SET estado = CASE
+  WHEN fecha_fin >= CURRENT_DATE THEN 'Activa'
+  ELSE 'Expirada'
+END;
+
+-- Ejemplo: Eliminar registro si sobrepasa los 3 años de expiración de membresía
+DELETE FROM inscripcion_membresia
+WHERE estado = 'Expirada'
+AND fecha_fin < CURRENT_DATE - INTERVAL '3 years';
+
+-- CREACION DE FUNCIONES
+
+-- ACTUALIZACIÓN DE ESTADO DE MEMBRESÍA
+CREATE OR REPLACE FUNCTION Actualizar_estado_membresia()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.fecha_fin < CURRENT_DATE THEN
+        NEW.estado := 'Expirada';
+    ELSE
+        NEW.estado := 'Activa';
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- EVITAR QUE LOS CLEINTES TENGAN MAS DE 3 RUTINAS ASIGNADAS 
+
+CREATE OR REPLACE FUNCTION Limitar_rutinas_cliente()
+RETURNS TRIGGER AS $$
+DECLARE
+    total_rutinas INT;
+BEGIN
+    SELECT COUNT(*) INTO total_rutinas
+    FROM rutina
+    WHERE id_cliente = NEW.id_cliente;
+
+    IF total_rutinas >= 3 THEN
+        RAISE EXCEPTION 'El cliente ya tiene el máximo de 3 rutinas asignadas';
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+
+-- CALCULO DE INDICE DE MASA CORPORAL 
+CREATE OR REPLACE FUNCTION calcular_IMC()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.imc := ROUND(NEW.peso / (NEW.altura * NEW.altura), 2);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+
+-- TRIGGERS
+
+-- LLAMADA A LA FUNCION PARA ACTUALIZAR MEMBRESÍA
+CREATE TRIGGER trg_actualizar_estado_membresia
+BEFORE INSERT OR UPDATE ON inscripcion_membresia
+FOR EACH ROW
+EXECUTE FUNCTION actualizar_estado_membresia();
+
+-- LLAMA DE LA FUNCIÓN PARA LIMITAR RUTINAS DE CLIENTES
+CREATE TRIGGER trg_limite_rutinas_cliente
+BEFORE INSERT ON rutina
+FOR EACH ROW
+EXECUTE FUNCTION limitar_rutinas_cliente();
+
+-- LLAMADA DE LA FUNCION calcular_IMC
+CREATE TRIGGER trg_calcular_IMC
+BEFORE INSERT OR UPDATE ON evaluacion_nutricional
+FOR EACH ROW
+EXECUTE FUNCTION calcular_IMC();
+
+-- PROCEDIMIENTO ALMACENADO
+
+CREATE OR REPLACE PROCEDURE registrar_pago(
+    p_id_factura INT,
+    p_monto DECIMAL,
+    p_metodo VARCHAR
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    INSERT INTO pago (id_factura, monto, metodo_pago)
+    VALUES (p_id_factura, p_monto, p_metodo);
+
+    UPDATE factura
+    SET total = total + p_monto
+    WHERE id_factura = p_id_factura;
+END;
+$$;
+
 
 -- 5. Administración y seguridad
 --CREAMOS ROLES
@@ -453,4 +675,5 @@ GRANT rol_nutricionista TO nutri_lucia;
 
 CREATE USER nutri_ricardo WITH PASSWORD 'RicardoSalud';
 GRANT rol_nutricionista TO nutri_ricardo;
+
 
