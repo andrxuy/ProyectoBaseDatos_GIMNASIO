@@ -55,7 +55,7 @@ CREATE TABLE entrenador (
         'Pérdida de Peso',
         'Hipertrofia Muscular',
         'Rehabilitación y Prevención',
-        'Salud y Bienestar General',
+        'Salud y Bienestar General'
     )),
     telefono VARCHAR(20)
 );
@@ -1023,5 +1023,3 @@ WHERE estado <> 'Cancelada';
 
 /*
 */
-
-
