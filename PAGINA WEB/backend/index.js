@@ -658,10 +658,10 @@ app.post('/api/rutinas/crear', authenticate, authorize('entrenador', 'administra
 });
 
 // ============================================
-// NUEVAS RUTAS PARA RECEPCIONISTA (CORREGIDAS)
+// RUTAS PARA RECEPCIONISTA (CREAR REGISTROS)
 // ============================================
 
-// 20) Recepcionista - Crear cliente usando función segura
+// 20) Recepcionista - Crear cliente
 app.post('/api/recepcionista/clientes', authenticate, authorize('administrador', 'recepcionista'), async (req, res) => {
   try {
     const { nombre, cedula, telefono, email } = req.body;
@@ -670,25 +670,24 @@ app.post('/api/recepcionista/clientes', authenticate, authorize('administrador',
       return res.status(400).json({ error: 'Nombre y cédula son obligatorios' });
     }
     
-    // Usar la función de PostgreSQL que creamos
-    const query = `SELECT registrar_cliente_seguro($1, $2, $3, $4) as id_cliente`;
-    const result = await pool.query(query, [nombre, cedula, telefono || null, email || null]);
+    // Insertar cliente directamente
+    const query = `
+      INSERT INTO cliente (nombre, cedula, telefono, email, fecha_registro) 
+      VALUES ($1, $2, $3, $4, CURRENT_DATE) 
+      RETURNING id_cliente, nombre, cedula, telefono, email, fecha_registro
+    `;
     
-    // Obtener los datos del cliente creado
-    const clienteCreado = await pool.query(
-      'SELECT id_cliente, nombre, cedula, telefono, email FROM cliente WHERE id_cliente = $1',
-      [result.rows[0].id_cliente]
-    );
+    const result = await pool.query(query, [nombre, cedula, telefono || null, email || null]);
     
     res.json({ 
       success: true, 
       mensaje: 'Cliente creado exitosamente',
-      data: clienteCreado.rows[0] 
+      data: result.rows[0] 
     });
   } catch (error) {
     console.error('❌ Error creando cliente:', error);
     
-    if (error.message.includes('unique') || error.code === '23505') {
+    if (error.code === '23505' || error.message.includes('unique')) {
       return res.status(400).json({ error: 'La cédula o email ya están registrados' });
     }
     
@@ -804,141 +803,346 @@ app.post('/api/recepcionista/pagos', authenticate, authorize('administrador', 'r
 });
 
 // ============================================
-// NUEVAS RUTAS PARA ÍNDICES, VISTAS, TRIGGERS Y FUNCIONES (CORREGIDAS)
+// RUTAS PARA ÍNDICES, VISTAS, TRIGGERS Y FUNCIONES REALES
 // ============================================
 
-// 24) Obtener índices de la base de datos - MEJORADA
-app.get('/api/indices', authenticate, authorize('administrador', 'recepcionista', 'entrenador', 'nutricionista'), async (req, res) => {
+// 24) Buscar cliente por cédula usando índice (todos pueden usar)
+app.get('/api/buscar-cliente-cedula/:cedula', authenticate, async (req, res) => {
   try {
-    // Usar la vista que creamos en PostgreSQL
-    const query = `SELECT * FROM vista_indices_detalle`;
-    const result = await pool.query(query);
-    res.json(result.rows);
-  } catch (error) {
-    console.error('❌ Error obteniendo índices:', error);
-    // Si falla la vista, intentar con consulta directa
-    try {
-      const query = `
-        SELECT 
-          schemaname,
-          tablename,
-          indexname,
-          indexdef
-        FROM pg_indexes 
-        WHERE schemaname = 'public'
-        ORDER BY tablename, indexname;
-      `;
-      const result = await pool.query(query);
-      res.json(result.rows);
-    } catch (error2) {
-      res.status(500).json({ error: error2.message });
-    }
-  }
-});
-
-// 25) Obtener vistas de la base de datos - MEJORADA
-app.get('/api/vistas', authenticate, authorize('administrador', 'recepcionista', 'entrenador', 'nutricionista'), async (req, res) => {
-  try {
-    const query = `
+    const { cedula } = req.params;
+    
+    const result = await pool.query(`
       SELECT 
-        table_schema,
-        table_name,
-        view_definition
-      FROM information_schema.views 
-      WHERE table_schema = 'public'
-      ORDER BY table_name;
-    `;
-    const result = await pool.query(query);
-    res.json(result.rows);
+        c.id_cliente,
+        c.nombre,
+        c.cedula,
+        c.telefono,
+        c.email,
+        c.fecha_registro,
+        (SELECT estado FROM inscripcion_membresia WHERE id_cliente = c.id_cliente AND estado = 'Activa' LIMIT 1) as estado_membresia,
+        (SELECT COUNT(*) FROM rutina WHERE id_cliente = c.id_cliente) as total_rutinas
+      FROM cliente c
+      WHERE c.cedula = $1
+      LIMIT 1
+    `, [cedula]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Cliente no encontrado' });
+    }
+    
+    res.json({ 
+      success: true, 
+      data: result.rows[0],
+      mensaje: 'Cliente encontrado usando índice de cédula'
+    });
   } catch (error) {
-    console.error('❌ Error obteniendo vistas:', error);
+    console.error('❌ Error buscando cliente por cédula:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// 26) Obtener triggers de la base de datos (solo admin) - MEJORADA
-app.get('/api/triggers', authenticate, authorize('administrador'), async (req, res) => {
+// 25) Ver auditoría de cambios (solo admin)
+app.get('/api/auditoria', authenticate, authorize('administrador'), async (req, res) => {
   try {
-    // Usar la vista que creamos en PostgreSQL
-    const query = `SELECT * FROM vista_triggers_detalle`;
-    const result = await pool.query(query);
-    res.json(result.rows);
-  } catch (error) {
-    console.error('❌ Error obteniendo triggers:', error);
-    // Si falla la vista, intentar con consulta directa
-    try {
-      const query = `
-        SELECT 
-          trigger_schema,
-          trigger_name,
-          event_manipulation,
-          event_object_table,
-          action_statement,
-          action_timing
-        FROM information_schema.triggers 
-        WHERE trigger_schema = 'public'
-        ORDER BY event_object_table, trigger_name;
-      `;
-      const result = await pool.query(query);
-      res.json(result.rows);
-    } catch (error2) {
-      res.status(500).json({ error: error2.message });
+    const { limite = 100, tabla, fecha_desde, fecha_hasta } = req.query;
+    
+    let query = `
+      SELECT 
+        id_auditoria,
+        tabla_nombre,
+        operacion,
+        registro_id,
+        datos_old,
+        datos_new,
+        usuario,
+        fecha
+      FROM auditoria 
+      WHERE 1=1
+    `;
+    
+    const params = [];
+    let paramCount = 1;
+    
+    if (tabla) {
+      query += ` AND tabla_nombre = $${paramCount}`;
+      params.push(tabla);
+      paramCount++;
     }
+    
+    if (fecha_desde) {
+      query += ` AND fecha >= $${paramCount}`;
+      params.push(fecha_desde);
+      paramCount++;
+    }
+    
+    if (fecha_hasta) {
+      query += ` AND fecha <= $${paramCount}`;
+      params.push(fecha_hasta);
+      paramCount++;
+    }
+    
+    query += ` ORDER BY fecha DESC LIMIT $${paramCount}`;
+    params.push(parseInt(limite));
+    
+    const result = await pool.query(query, params);
+    
+    res.json({ 
+      success: true, 
+      data: result.rows,
+      total: result.rows.length,
+      mensaje: 'Registros de auditoría'
+    });
+  } catch (error) {
+    console.error('❌ Error obteniendo auditoría:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// 27) Obtener funciones de la base de datos (solo admin) - MEJORADA
-app.get('/api/funciones', authenticate, authorize('administrador'), async (req, res) => {
+// 26) Ejecutar función específica (solo admin)
+app.post('/api/ejecutar-funcion/:nombre', authenticate, authorize('administrador'), async (req, res) => {
   try {
-    // Usar la vista que creamos en PostgreSQL
-    const query = `SELECT * FROM vista_funciones_detalle`;
-    const result = await pool.query(query);
-    res.json(result.rows);
-  } catch (error) {
-    console.error('❌ Error obteniendo funciones:', error);
-    // Si falla la vista, intentar con consulta directa
-    try {
-      const query = `
-        SELECT 
-          routine_schema,
-          routine_name,
-          data_type,
-          routine_definition
-        FROM information_schema.routines 
-        WHERE routine_schema = 'public'
-          AND routine_type = 'FUNCTION'
-        ORDER BY routine_name;
-      `;
-      const result = await pool.query(query);
-      res.json(result.rows);
-    } catch (error2) {
-      res.status(500).json({ error: error2.message });
-    }
-  }
-});
-
-// ============================================
-// RUTAS PARA CRUD ADMINISTRADOR (SIMPLIFICADAS)
-// ============================================
-
-// 28) Admin - Listar cualquier tabla
-app.get('/api/admin/tabla/:tabla', authenticate, authorize('administrador'), async (req, res) => {
-  try {
-    const { tabla } = req.params;
-    const tablasPermitidas = [
-      'cliente', 'membresia', 'entrenador', 'nutricionista', 
-      'ejercicio', 'rutina', 'inscripcion_membresia', 'factura', 
-      'pago', 'evaluacion_nutricional', 'dieta', 'rutina_ejercicio'
+    const { nombre } = req.params;
+    const { parametros } = req.body;
+    
+    // Validar funciones permitidas
+    const funcionesPermitidas = [
+      'mantenimiento_automatico',
+      'registrar_pago',
+      'calcular_imc',
+      'actualizar_estado_membresia'
     ];
     
-    if (!tablasPermitidas.includes(tabla)) {
-      return res.status(400).json({ error: 'Tabla no permitida' });
+    if (!funcionesPermitidas.includes(nombre)) {
+      return res.status(400).json({ error: 'Función no permitida' });
     }
+    
+    let query = '';
+    let result;
+    
+    switch (nombre) {
+      case 'mantenimiento_automatico':
+        query = 'CALL mantenimiento_automatico()';
+        result = await pool.query(query);
+        return res.json({ 
+          success: true, 
+          mensaje: '✅ Mantenimiento automático ejecutado',
+          data: result.rows 
+        });
+        
+      case 'registrar_pago':
+        if (!parametros || !parametros.id_factura || !parametros.monto) {
+          return res.status(400).json({ error: 'Parámetros faltantes: id_factura, monto' });
+        }
+        query = 'CALL registrar_pago($1, $2, $3)';
+        result = await pool.query(query, [
+          parametros.id_factura,
+          parametros.monto,
+          parametros.metodo || 'Efectivo'
+        ]);
+        return res.json({ 
+          success: true, 
+          mensaje: '✅ Pago registrado exitosamente',
+          data: result.rows 
+        });
+        
+      default:
+        return res.status(400).json({ error: 'Función no implementada' });
+    }
+  } catch (error) {
+    console.error(`❌ Error ejecutando función ${req.params.nombre}:`, error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
-    const result = await pool.query(`SELECT * FROM ${tabla} ORDER BY 1`);
+// ============================================
+// RUTAS CRUD COMPLETAS PARA ADMINISTRADOR
+// ============================================
+
+// 27) Admin - Obtener cualquier tabla (CRUD completo)
+app.get('/api/admin/tablas/:tabla', authenticate, authorize('administrador'), async (req, res) => {
+  try {
+    const { tabla } = req.params;
+    const { buscar, campo, limite = 100 } = req.query;
+    
+    // Todas las tablas permitidas
+    let query = `SELECT * FROM ${tabla}`;
+    const params = [];
+    
+    if (buscar && campo) {
+      query += ` WHERE ${campo}::text ILIKE $1`;
+      params.push(`%${buscar}%`);
+    }
+    
+    query += ` ORDER BY 1 LIMIT $${params.length + 1}`;
+    params.push(parseInt(limite));
+    
+    const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (error) {
-    console.error(`❌ Error en admin/tabla/${req.params.tabla}:`, error);
+    console.error(`❌ Error obteniendo tabla ${req.params.tabla}:`, error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 28) Admin - Crear registro en cualquier tabla
+app.post('/api/admin/tablas/:tabla', authenticate, authorize('administrador'), async (req, res) => {
+  try {
+    const { tabla } = req.params;
+    const datos = req.body;
+    
+    // Quitar id si viene (se generará automáticamente)
+    delete datos.id;
+    delete datos.id_cliente;
+    delete datos.id_membresia;
+    delete datos.id_entrenador;
+    delete datos.id_nutricionista;
+    delete datos.id_ejercicio;
+    delete datos.id_rutina;
+    delete datos.id_inscripcionM;
+    delete datos.id_factura;
+    delete datos.id_pago;
+    delete datos.id_evaluacion;
+    delete datos.id_dieta;
+    delete datos.id_rutina_ejercicio;
+    delete datos.id_auditoria;
+    delete datos.id_auth;
+    
+    const campos = Object.keys(datos).filter(k => datos[k] !== undefined && datos[k] !== '');
+    const valores = campos.map(k => datos[k]);
+    
+    if (campos.length === 0) {
+      return res.status(400).json({ error: 'No hay datos para insertar' });
+    }
+    
+    const placeholders = valores.map((_, i) => `$${i + 1}`).join(', ');
+    const query = `INSERT INTO ${tabla} (${campos.join(', ')}) VALUES (${placeholders}) RETURNING *`;
+    
+    const result = await pool.query(query, valores);
+    
+    res.json({ 
+      success: true, 
+      mensaje: 'Registro creado exitosamente',
+      data: result.rows[0] 
+    });
+  } catch (error) {
+    console.error(`❌ Error creando registro en ${req.params.tabla}:`, error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 29) Admin - Actualizar registro en cualquier tabla
+app.put('/api/admin/tablas/:tabla/:id', authenticate, authorize('administrador'), async (req, res) => {
+  try {
+    const { tabla, id } = req.params;
+    const datos = req.body;
+    
+    // Quitar campos que no deben actualizarse
+    delete datos.id;
+    
+    const campos = Object.keys(datos).filter(k => datos[k] !== undefined);
+    const valores = campos.map(k => datos[k]);
+    
+    if (campos.length === 0) {
+      return res.status(400).json({ error: 'No hay datos para actualizar' });
+    }
+    
+    // Determinar columna ID según tabla
+    let idColumn = 'id';
+    switch (tabla) {
+      case 'cliente': idColumn = 'id_cliente'; break;
+      case 'membresia': idColumn = 'id_membresia'; break;
+      case 'entrenador': idColumn = 'id_entrenador'; break;
+      case 'nutricionista': idColumn = 'id_nutricionista'; break;
+      case 'ejercicio': idColumn = 'id_ejercicio'; break;
+      case 'rutina': idColumn = 'id_rutina'; break;
+      case 'inscripcion_membresia': idColumn = 'id_inscripcionM'; break;
+      case 'factura': idColumn = 'id_factura'; break;
+      case 'pago': idColumn = 'id_pago'; break;
+      case 'evaluacion_nutricional': idColumn = 'id_evaluacion'; break;
+      case 'dieta': idColumn = 'id_dieta'; break;
+      case 'rutina_ejercicio': idColumn = 'id_rutina_ejercicio'; break;
+      case 'auditoria': idColumn = 'id_auditoria'; break;
+      case 'cliente_auth': idColumn = 'id_auth'; break;
+      default: idColumn = 'id';
+    }
+    
+    const updates = campos.map((key, i) => `${key} = $${i + 1}`).join(', ');
+    valores.push(id);
+    
+    const query = `UPDATE ${tabla} SET ${updates} WHERE ${idColumn} = $${valores.length} RETURNING *`;
+    const result = await pool.query(query, valores);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Registro no encontrado' });
+    }
+    
+    res.json({ 
+      success: true, 
+      mensaje: 'Registro actualizado exitosamente',
+      data: result.rows[0] 
+    });
+  } catch (error) {
+    console.error(`❌ Error actualizando registro en ${req.params.tabla}:`, error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 30) Admin - Eliminar registro en cualquier tabla
+app.delete('/api/admin/tablas/:tabla/:id', authenticate, authorize('administrador'), async (req, res) => {
+  try {
+    const { tabla, id } = req.params;
+    
+    // Determinar columna ID según tabla
+    let idColumn = 'id';
+    switch (tabla) {
+      case 'cliente': idColumn = 'id_cliente'; break;
+      case 'membresia': idColumn = 'id_membresia'; break;
+      case 'entrenador': idColumn = 'id_entrenador'; break;
+      case 'nutricionista': idColumn = 'id_nutricionista'; break;
+      case 'ejercicio': idColumn = 'id_ejercicio'; break;
+      case 'rutina': idColumn = 'id_rutina'; break;
+      case 'inscripcion_membresia': idColumn = 'id_inscripcionM'; break;
+      case 'factura': idColumn = 'id_factura'; break;
+      case 'pago': idColumn = 'id_pago'; break;
+      case 'evaluacion_nutricional': idColumn = 'id_evaluacion'; break;
+      case 'dieta': idColumn = 'id_dieta'; break;
+      case 'rutina_ejercicio': idColumn = 'id_rutina_ejercicio'; break;
+      case 'auditoria': idColumn = 'id_auditoria'; break;
+      case 'cliente_auth': idColumn = 'id_auth'; break;
+      default: idColumn = 'id';
+    }
+    
+    const query = `DELETE FROM ${tabla} WHERE ${idColumn} = $1 RETURNING *`;
+    const result = await pool.query(query, [id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Registro no encontrado' });
+    }
+    
+    res.json({ 
+      success: true, 
+      mensaje: 'Registro eliminado exitosamente',
+      data: result.rows[0] 
+    });
+  } catch (error) {
+    console.error(`❌ Error eliminando registro de ${req.params.tabla}:`, error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 31) Admin - Obtener lista de tablas disponibles
+app.get('/api/admin/tablas-disponibles', authenticate, authorize('administrador'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      AND table_type = 'BASE TABLE'
+      ORDER BY table_name
+    `);
+    res.json(result.rows.map(row => row.table_name));
+  } catch (error) {
+    console.error('❌ Error obteniendo tablas:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -952,16 +1156,20 @@ const PORT = process.env.PORT || 5000;
 // Ruta raíz
 app.get('/', (req, res) => {
   res.json({
-    mensaje: 'Backend Gimnasio Ortiz-Oto API - CORREGIDO Y MEJORADO',
+    mensaje: 'Backend Gimnasio Ortiz-Oto API - CRUD COMPLETO',
     estado: '✅ En línea',
-    login_corregido: 'Sí - Usa crypt() para comparar contraseñas',
-    endpoints_corregidos: {
-      recepcionista: '✅ Ahora puede crear clientes, inscripciones, facturas y pagos',
-      vistas_e_indices: '✅ Ahora muestran datos correctamente',
-      seleccion_ejercicios: '✅ Funciona correctamente con grupos musculares',
-      triggers_funciones: '✅ Solo admin puede ver triggers y funciones'
+    funciones_reales: {
+      buscar_cliente: 'GET /api/buscar-cliente-cedula/:cedula',
+      auditoria: 'GET /api/auditoria (solo admin)',
+      ejecutar_funciones: 'POST /api/ejecutar-funcion/:nombre (solo admin)',
+      crud_admin: 'GET/POST/PUT/DELETE /api/admin/tablas/:tabla'
     },
-    instrucciones: 'Ejecuta los comandos SQL de corrección en PostgreSQL para que todo funcione'
+    permisos: {
+      administrador: 'CRUD completo en todas las tablas + auditoría + ejecutar funciones',
+      recepcionista: 'Crear clientes, inscripciones, facturas, pagos',
+      entrenador: 'Ver clientes, crear rutinas, ver ejercicios',
+      nutricionista: 'Ver evaluaciones, crear dietas'
+    }
   });
 });
 
@@ -973,8 +1181,8 @@ app.use((req, res) => {
 // Iniciar servidor
 app.listen(PORT, () => {
   console.log(`🚀 Servidor backend corriendo en http://localhost:${PORT}`);
-  console.log(`📊 Login CORREGIDO - Ahora funciona con crypt()`);
-  console.log(`🔧 RECEPCIONISTA - Ahora puede crear registros`);
-  console.log(`👁️ VISTAS E ÍNDICES - Ahora muestran datos correctamente`);
-  console.log(`⚡ IMPORTANTE: Ejecuta los comandos SQL de corrección en PostgreSQL`);
+  console.log(`🔧 ADMINISTRADOR: CRUD completo habilitado en todas las tablas`);
+  console.log(`🔍 ÍNDICES REALES: Búsqueda por cédula disponible`);
+  console.log(`📊 AUDITORÍA: Sistema de auditoría activo`);
+  console.log(`⚡ FUNCIONES: Ejecutar funciones de PostgreSQL desde frontend`);
 });
