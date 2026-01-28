@@ -659,32 +659,36 @@ function App() {
             onChange={(e) => setFuncionSeleccionada(e.target.value)}
           >
             <option value="">Seleccionar función</option>
-            <option value="mantenimiento_automatico">Mantenimiento Automático</option>
-            <option value="registrar_pago">Registrar Pago</option>
+            <option value="registrar_pago_simple">Registrar Pago</option>
           </select>
           
-          {funcionSeleccionada === 'registrar_pago' && (
+          {funcionSeleccionada === 'registrar_pago_simple' && (
             <>
               <input
                 style={styles.input}
-                placeholder="ID Factura"
+                placeholder="ID Factura (número)"
                 value={parametrosFuncion.id_factura || ''}
                 onChange={(e) => setParametrosFuncion({...parametrosFuncion, id_factura: e.target.value})}
               />
               <input
                 style={styles.input}
-                placeholder="Monto"
+                placeholder="Monto (ej: 50.00)"
                 type="number"
                 step="0.01"
                 value={parametrosFuncion.monto || ''}
                 onChange={(e) => setParametrosFuncion({...parametrosFuncion, monto: e.target.value})}
               />
-              <input
+              <select
                 style={styles.input}
-                placeholder="Método (opcional)"
-                value={parametrosFuncion.metodo || ''}
+                value={parametrosFuncion.metodo || 'Efectivo'}
                 onChange={(e) => setParametrosFuncion({...parametrosFuncion, metodo: e.target.value})}
-              />
+              >
+                <option value="Efectivo">Efectivo</option>
+                <option value="Tarjeta Débito">Tarjeta Débito</option>
+                <option value="Tarjeta Crédito">Tarjeta Crédito</option>
+                <option value="Transferencia Bancaria">Transferencia Bancaria</option>
+                <option value="Débito Automático">Débito Automático</option>
+              </select>
             </>
           )}
           
