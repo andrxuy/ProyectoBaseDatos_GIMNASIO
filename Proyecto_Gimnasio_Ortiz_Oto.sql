@@ -1023,3 +1023,139 @@ WHERE estado <> 'Cancelada';
 
 /*
 */
+-- 10. Creación de tablas de auditoría y triggers correspondientes 
+-- Tabla de auditoría
+
+CREATE TABLE IF NOT EXISTS auditoria (
+    id_auditoria SERIAL PRIMARY KEY,
+    tabla_nombre VARCHAR(50),
+    operacion VARCHAR(10),
+    registro_id INT,
+    datos_old JSONB,
+    datos_new JSONB,
+    usuario TEXT,
+    fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Funcion para resumir
+CREATE OR REPLACE FUNCTION trigger_auditoria()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_usuario TEXT;
+    v_registro_id INT;
+BEGIN
+    v_usuario := current_user;
+
+    -- Determinar id principal según tabla
+    CASE TG_TABLE_NAME
+        WHEN 'cliente' THEN v_registro_id := COALESCE(NEW.id_cliente, OLD.id_cliente);
+        WHEN 'membresia' THEN v_registro_id := COALESCE(NEW.id_membresia, OLD.id_membresia);
+        WHEN 'inscripcion_membresia' THEN v_registro_id := COALESCE(NEW.id_inscripcionM, OLD.id_inscripcionM);
+        WHEN 'rutina' THEN v_registro_id := COALESCE(NEW.id_rutina, OLD.id_rutina);
+        WHEN 'ejercicio' THEN v_registro_id := COALESCE(NEW.id_ejercicio, OLD.id_ejercicio);
+        WHEN 'rutina_ejercicio' THEN v_registro_id := COALESCE(NEW.id_rutina_ejercicio, OLD.id_rutina_ejercicio);
+        WHEN 'nutricionista' THEN v_registro_id := COALESCE(NEW.id_nutricionista, OLD.id_nutricionista);
+        WHEN 'evaluacion_nutricional' THEN v_registro_id := COALESCE(NEW.id_evaluacion, OLD.id_evaluacion);
+        WHEN 'dieta' THEN v_registro_id := COALESCE(NEW.id_dieta, OLD.id_dieta);
+        WHEN 'factura' THEN v_registro_id := COALESCE(NEW.id_factura, OLD.id_factura);
+        WHEN 'pago' THEN v_registro_id := COALESCE(NEW.id_pago, OLD.id_pago);
+        WHEN 'cliente_auth' THEN v_registro_id := COALESCE(NEW.id_auth, OLD.id_auth);
+        ELSE v_registro_id := NULL;
+    END CASE;
+
+    -- INSERT
+    IF TG_OP = 'INSERT' THEN
+        INSERT INTO auditoria(tabla_nombre, operacion, registro_id, datos_new, usuario)
+        VALUES (TG_TABLE_NAME, 'INSERT', v_registro_id, to_jsonb(NEW), v_usuario);
+        RETURN NEW;
+
+    -- UPDATE
+    ELSIF TG_OP = 'UPDATE' THEN
+        INSERT INTO auditoria(tabla_nombre, operacion, registro_id, datos_old, datos_new, usuario)
+        VALUES (TG_TABLE_NAME, 'UPDATE', v_registro_id, to_jsonb(OLD), to_jsonb(NEW), v_usuario);
+        RETURN NEW;
+
+    -- DELETE
+    ELSIF TG_OP = 'DELETE' THEN
+        INSERT INTO auditoria(tabla_nombre, operacion, registro_id, datos_old, usuario)
+        VALUES (TG_TABLE_NAME, 'DELETE', v_registro_id, to_jsonb(OLD), v_usuario);
+        RETURN OLD;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Triggers por tabla
+
+
+-- Cliente
+CREATE TRIGGER trg_auditoria_cliente
+AFTER INSERT OR UPDATE OR DELETE ON cliente
+FOR EACH ROW
+EXECUTE FUNCTION trigger_auditoria();
+
+-- Membresía
+CREATE TRIGGER trg_auditoria_membresia
+AFTER INSERT OR UPDATE OR DELETE ON membresia
+FOR EACH ROW
+EXECUTE FUNCTION trigger_auditoria();
+
+-- Inscripción Membresía
+CREATE TRIGGER trg_auditoria_inscripcion
+AFTER INSERT OR UPDATE OR DELETE ON inscripcion_membresia
+FOR EACH ROW
+EXECUTE FUNCTION trigger_auditoria();
+
+-- Rutina
+CREATE TRIGGER trg_auditoria_rutina
+AFTER INSERT OR UPDATE OR DELETE ON rutina
+FOR EACH ROW
+EXECUTE FUNCTION trigger_auditoria();
+
+-- Ejercicio
+CREATE TRIGGER trg_auditoria_ejercicio
+AFTER INSERT OR UPDATE OR DELETE ON ejercicio
+FOR EACH ROW
+EXECUTE FUNCTION trigger_auditoria();
+
+-- Rutina_Ejercicio
+CREATE TRIGGER trg_auditoria_rutina_ejercicio
+AFTER INSERT OR UPDATE OR DELETE ON rutina_ejercicio
+FOR EACH ROW
+EXECUTE FUNCTION trigger_auditoria();
+
+-- Nutricionista
+CREATE TRIGGER trg_auditoria_nutricionista
+AFTER INSERT OR UPDATE OR DELETE ON nutricionista
+FOR EACH ROW
+EXECUTE FUNCTION trigger_auditoria();
+
+-- Evaluación Nutricional
+CREATE TRIGGER trg_auditoria_evaluacion
+AFTER INSERT OR UPDATE OR DELETE ON evaluacion_nutricional
+FOR EACH ROW
+EXECUTE FUNCTION trigger_auditoria();
+
+-- Dieta
+CREATE TRIGGER trg_auditoria_dieta
+AFTER INSERT OR UPDATE OR DELETE ON dieta
+FOR EACH ROW
+EXECUTE FUNCTION trigger_auditoria();
+
+-- Factura
+CREATE TRIGGER trg_auditoria_factura
+AFTER INSERT OR UPDATE OR DELETE ON factura
+FOR EACH ROW
+EXECUTE FUNCTION trigger_auditoria();
+
+-- Pago
+CREATE TRIGGER trg_auditoria_pago
+AFTER INSERT OR UPDATE OR DELETE ON pago
+FOR EACH ROW
+EXECUTE FUNCTION trigger_auditoria();
+
+-- Cliente_auth
+CREATE TRIGGER trg_auditoria_auth
+AFTER INSERT OR UPDATE OR DELETE ON cliente_auth
+FOR EACH ROW
+EXECUTE FUNCTION trigger_auditoria();
+
