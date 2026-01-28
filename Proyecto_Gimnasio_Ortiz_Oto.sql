@@ -1255,4 +1255,88 @@ GRANT EXECUTE ON FUNCTION registrar_cliente_seguro TO rol_administrador;
 
 
 
+/*AGREGAR MÁS PERMISOS HOY 28/01/2026 8:31 AM*/
+-- Dar TODOS los permisos a admin_gimnasio en TODAS las tablas
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO admin_gimnasio;
+
+-- Dar permisos en secuencias
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO admin_gimnasio;
+
+-- Dar permisos en funciones
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO admin_gimnasio;
+
+-- Dar permisos en procedimientos
+GRANT EXECUTE ON ALL PROCEDURES IN SCHEMA public TO admin_gimnasio;
+
+-- Dar permisos en la tabla auditoria específicamente
+GRANT ALL PRIVILEGES ON TABLE auditoria TO admin_gimnasio;
+GRANT ALL PRIVILEGES ON SEQUENCE auditoria_id_auditoria_seq TO admin_gimnasio;
+
+-- Dar permisos para acceder a vistas de información del sistema
+GRANT SELECT ON pg_catalog.pg_tables TO admin_gimnasio;
+GRANT SELECT ON pg_catalog.pg_indexes TO admin_gimnasio;
+GRANT SELECT ON pg_catalog.pg_trigger TO admin_gimnasio;
+GRANT SELECT ON pg_catalog.pg_proc TO admin_gimnasio;
+
+-- Actualizar contraseña de admin_gimnasio para asegurar conexión
+ALTER USER admin_gimnasio WITH PASSWORD 'admin1234';
+
+-- PERMISOS PARA RECEPCIONISTA (corrección)
+
+
+-- Asegurar que recepcionista pueda hacer CRUD en cliente
+GRANT INSERT, UPDATE, SELECT ON cliente TO rol_recepcionista;
+
+-- Asegurar permisos completos en factura y pago
+GRANT INSERT, UPDATE, SELECT ON factura TO rol_recepcionista;
+GRANT INSERT, UPDATE, SELECT ON pago TO rol_recepcionista;
+
+-- Asegurar permisos en inscripcion_membresia
+GRANT INSERT, UPDATE, SELECT ON inscripcion_membresia TO rol_recepcionista;
+
+-- CREAR FUNCIÓN SIMPLIFICADA PARA PAGOS
+
+CREATE OR REPLACE FUNCTION registrar_pago_simple(
+    p_id_factura INT,
+    p_monto DECIMAL,
+    p_metodo VARCHAR DEFAULT 'Efectivo'
+) RETURNS JSON AS $$
+DECLARE
+    result JSON;
+BEGIN
+    INSERT INTO pago (id_factura, monto, metodo_pago, fecha_pago)
+    VALUES (p_id_factura, p_monto, p_metodo, CURRENT_TIMESTAMP);
+    
+    -- Actualizar total en factura
+    UPDATE factura 
+    SET total = total + p_monto 
+    WHERE id_factura = p_id_factura;
+    
+    SELECT json_build_object(
+        'success', true,
+        'message', 'Pago registrado exitosamente',
+        'id_factura', p_id_factura,
+        'monto', p_monto,
+        'metodo', p_metodo,
+        'fecha', CURRENT_TIMESTAMP
+    ) INTO result;
+    
+    RETURN result;
+    
+EXCEPTION WHEN OTHERS THEN
+    SELECT json_build_object(
+        'success', false,
+        'message', 'Error registrando pago: ' || SQLERRM
+    ) INTO result;
+    RETURN result;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Dar permisos para usar la función
+GRANT EXECUTE ON FUNCTION registrar_pago_simple TO rol_administrador;
+GRANT EXECUTE ON FUNCTION registrar_pago_simple TO rol_recepcionista;
+GRANT EXECUTE ON FUNCTION registrar_pago_simple TO admin_gimnasio;
+
+
+
 
