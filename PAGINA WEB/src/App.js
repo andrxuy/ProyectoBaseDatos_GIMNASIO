@@ -5,7 +5,6 @@ const API_URL = "http://localhost:5000/api";
 
 function App() {
   const [vista, setVista] = useState("");
-  const [mensaje, setMensaje] = useState("");
   const [cargando, setCargando] = useState(false);
   const [usuarioLogueado, setUsuarioLogueado] = useState(null);
   const [rolActual, setRolActual] = useState("");
@@ -22,46 +21,47 @@ function App() {
   const [ejerciciosFiltrados, setEjerciciosFiltrados] = useState([]);
   const [ejerciciosSeleccionados, setEjerciciosSeleccionados] = useState([]);
   const [mostrarEjercicios, setMostrarEjercicios] = useState(false);
-
-  // Estados para crear rutina
   const [nombreRutina, setNombreRutina] = useState("");
   const [nivelRutina, setNivelRutina] = useState("Principiante");
   const [objetivoRutina, setObjetivoRutina] = useState("");
+  const [clientesEntrenador, setClientesEntrenador] = useState([]);
+  const [clienteSeleccionadoParaRutina, setClienteSeleccionadoParaRutina] = useState("");
 
   // Estados para tablas
   const [datosTabla, setDatosTabla] = useState([]);
   const [tituloTabla, setTituloTabla] = useState("");
   const [columnasTabla, setColumnasTabla] = useState([]);
 
-  // Estados específicos de Entrenador
-  const [clientesEntrenador, setClientesEntrenador] = useState([]);
-  const [clienteSeleccionadoParaRutina, setClienteSeleccionadoParaRutina] = useState("");
-
-  // Estados para CRUD (Administrador)
-  const [modoCRUD, setModoCRUD] = useState("listar"); // 'listar', 'crear', 'editar'
-  const [tablaActualCRUD, setTablaActualCRUD] = useState("");
-  const [formDataCRUD, setFormDataCRUD] = useState({});
-  const [idEditando, setIdEditando] = useState(null);
-
-  // Estados para índices y vistas
-  const [indices, setIndices] = useState([]);
-  const [vistasDB, setVistasDB] = useState([]);
-  const [triggers, setTriggers] = useState([]);
-  const [funciones, setFunciones] = useState([]);
+  // Estados para CRUD Administrador
+  const [tablasDisponibles, setTablasDisponibles] = useState([]);
+  const [tablaSeleccionada, setTablaSeleccionada] = useState("");
+  const [filtroBusqueda, setFiltroBusqueda] = useState("");
+  const [campoBusqueda, setCampoBusqueda] = useState("");
+  const [modoEdicion, setModoEdicion] = useState(null); // null, 'crear', 'editar'
+  const [registroEditando, setRegistroEditando] = useState({});
 
   // Estados para Recepcionista
   const [nuevoCliente, setNuevoCliente] = useState({
-    nombre: "",
-    cedula: "",
-    telefono: "",
-    email: ""
+    nombre: "", cedula: "", telefono: "", email: ""
   });
   const [membresiasDisponibles, setMembresiasDisponibles] = useState([]);
   const [inscripcionData, setInscripcionData] = useState({
-    id_cliente: "",
-    id_membresia: "",
-    fecha_inicio: new Date().toISOString().split('T')[0]
+    id_cliente: "", id_membresia: "", fecha_inicio: new Date().toISOString().split('T')[0]
   });
+
+  // Estados para Búsqueda por índice
+  const [cedulaBuscar, setCedulaBuscar] = useState("");
+  const [resultadoBusqueda, setResultadoBusqueda] = useState(null);
+
+  // Estados para Auditoría
+  const [auditoriaData, setAuditoriaData] = useState([]);
+  const [filtroAuditoria, setFiltroAuditoria] = useState({
+    tabla: "", fecha_desde: "", fecha_hasta: ""
+  });
+
+  // Estados para Ejecutar Funciones
+  const [funcionSeleccionada, setFuncionSeleccionada] = useState("");
+  const [parametrosFuncion, setParametrosFuncion] = useState({});
 
   // Configurar headers de axios
   useEffect(() => {
@@ -78,45 +78,6 @@ function App() {
       cargarGruposMusculares();
     }
   }, [vista]);
-
-  // ==================== UTILIDADES DE ORDEN POR ID ====================
-  const getIdKey = (row) => {
-    if (!row || typeof row !== "object") return null;
-    const keys = Object.keys(row);
-
-    const idLike = keys.find((k) => /^id_/.test(k));
-    if (idLike) return idLike;
-
-    const idSuffix = keys.find((k) => /_id$/.test(k));
-    if (idSuffix) return idSuffix;
-
-    if (keys.includes("id")) return "id";
-
-    return null;
-  };
-
-  const sortById = (arr) => {
-    if (!Array.isArray(arr) || arr.length === 0) return arr;
-    const idKey = getIdKey(arr[0]);
-    if (!idKey) return arr;
-
-    return [...arr].sort((a, b) => {
-      const av = a[idKey];
-      const bv = b[idKey];
-
-      const an = Number(av);
-      const bn = Number(bv);
-      const aIsNum = !isNaN(an);
-      const bIsNum = !isNaN(bn);
-
-      if (aIsNum && bIsNum) return an - bn;
-
-      return String(av).localeCompare(String(bv), "es", {
-        sensitivity: "base",
-        numeric: true,
-      });
-    });
-  };
 
   // ==================== FUNCIONES BÁSICAS ====================
   const probarConexion = async () => {
@@ -188,7 +149,7 @@ function App() {
     try {
       const gruposParam = gruposSeleccionados.join(',');
       const response = await axios.get(`${API_URL}/ejercicios?grupos=${gruposParam}`);
-      setEjerciciosFiltrados(sortById(response.data));
+      setEjerciciosFiltrados(response.data);
       setMostrarEjercicios(true);
     } catch (error) {
       console.error("Error cargando ejercicios:", error);
@@ -196,68 +157,94 @@ function App() {
     }
   };
 
-  // ==================== FUNCIONES PARA CADA ROL ====================
+  // ==================== FUNCIONES PARA ÍNDICES REALES ====================
+  const buscarClientePorCedula = async () => {
+    if (!cedulaBuscar.trim()) {
+      alert("Ingrese una cédula para buscar");
+      return;
+    }
 
-  // Admin: cargar todas las tablas
-  const adminCargarTabla = async (tipo) => {
     try {
-      const endpoints = {
-        clientes: "/admin/clientes-todos",
-        ejercicios: "/ejercicios-todos",
-        membresias: "/membresias-todas",
-        inscripciones: "/inscripciones-todas",
-        facturas: "/facturas-todas",
-        pagos: "/pagos-todos",
-        entrenadores: "/entrenadores-todos",
-        evaluaciones: "/evaluaciones-todas",
-        dietas: "/dietas-todas",
-        rutinas: "/rutinas-todas"
-      };
-
-      const endpoint = endpoints[tipo];
-      if (!endpoint) return;
-
-      const response = await axios.get(`${API_URL}${endpoint}`);
-      const ordenados = sortById(response.data);
-      setDatosTabla(ordenados);
-      setTituloTabla(`Administrador - ${tipo.charAt(0).toUpperCase() + tipo.slice(1)}`);
-
-      if (ordenados.length > 0) {
-        const primeraFila = ordenados[0];
-        setColumnasTabla(Object.keys(primeraFila));
-      }
+      const response = await axios.get(`${API_URL}/buscar-cliente-cedula/${cedulaBuscar}`);
+      setResultadoBusqueda(response.data.data);
+      alert(`✅ Cliente encontrado: ${response.data.data.nombre}`);
     } catch (error) {
-      alert(`❌ Error cargando ${tipo}: ${error.response?.data?.error || error.message}`);
+      console.error("Error buscando cliente:", error);
+      setResultadoBusqueda(null);
+      alert(`❌ ${error.response?.data?.error || "Cliente no encontrado"}`);
     }
   };
 
-  // ==================== FUNCIONES CRUD PARA ADMINISTRADOR ====================
-  const adminIniciarCRUD = async (tabla) => {
-    setTablaActualCRUD(tabla);
-    setModoCRUD("listar");
-    setFormDataCRUD({});
-    setIdEditando(null);
+  // ==================== FUNCIONES PARA AUDITORÍA ====================
+  const cargarAuditoria = async () => {
+    try {
+      const params = new URLSearchParams();
+      if (filtroAuditoria.tabla) params.append('tabla', filtroAuditoria.tabla);
+      if (filtroAuditoria.fecha_desde) params.append('fecha_desde', filtroAuditoria.fecha_desde);
+      if (filtroAuditoria.fecha_hasta) params.append('fecha_hasta', filtroAuditoria.fecha_hasta);
+      
+      const response = await axios.get(`${API_URL}/auditoria?${params.toString()}`);
+      setAuditoriaData(response.data.data);
+      setDatosTabla(response.data.data);
+      setTituloTabla("Registros de Auditoría");
+      setColumnasTabla(['id_auditoria', 'tabla_nombre', 'operacion', 'registro_id', 'usuario', 'fecha']);
+    } catch (error) {
+      console.error("Error cargando auditoría:", error);
+      alert(`❌ Error: ${error.response?.data?.error || error.message}`);
+    }
+  };
+
+  // ==================== FUNCIONES PARA EJECUTAR FUNCIONES ====================
+  const ejecutarFuncion = async () => {
+    if (!funcionSeleccionada) {
+      alert("Seleccione una función para ejecutar");
+      return;
+    }
+
+    try {
+      const response = await axios.post(
+        `${API_URL}/ejecutar-funcion/${funcionSeleccionada}`,
+        { parametros: parametrosFuncion }
+      );
+      
+      alert(`✅ ${response.data.mensaje}`);
+      
+      // Limpiar después de ejecutar
+      setFuncionSeleccionada("");
+      setParametrosFuncion({});
+      
+    } catch (error) {
+      console.error("Error ejecutando función:", error);
+      alert(`❌ Error: ${error.response?.data?.error || error.message}`);
+    }
+  };
+
+  // ==================== CRUD COMPLETO PARA ADMINISTRADOR ====================
+  const cargarTablasDisponibles = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/admin/tablas-disponibles`);
+      setTablasDisponibles(response.data);
+    } catch (error) {
+      console.error("Error cargando tablas:", error);
+    }
+  };
+
+  const cargarTablaCRUD = async (tabla) => {
+    setTablaSeleccionada(tabla);
+    setModoEdicion(null);
+    setRegistroEditando({});
     
     try {
-      const response = await axios.get(`${API_URL}/admin/tabla/${tabla}`);
-      setDatosTabla(sortById(response.data));
-      setTituloTabla(`Administrar ${tabla}`);
-      
-      if (response.data.length > 0) {
-        setColumnasTabla(Object.keys(response.data[0]));
+      const params = new URLSearchParams();
+      if (filtroBusqueda && campoBusqueda) {
+        params.append('buscar', filtroBusqueda);
+        params.append('campo', campoBusqueda);
       }
-    } catch (error) {
-      alert(`❌ Error cargando ${tabla}: ${error.response?.data?.error || error.message}`);
-    }
-  };
-
-  // ==================== FUNCIONES PARA ÍNDICES, VISTAS, TRIGGERS Y FUNCIONES ====================
-  const cargarIndices = async () => {
-    try {
-      const response = await axios.get(`${API_URL}/indices`);
-      console.log('Índices recibidos:', response.data);
+      params.append('limite', 100);
+      
+      const response = await axios.get(`${API_URL}/admin/tablas/${tabla}?${params.toString()}`);
       setDatosTabla(response.data);
-      setTituloTabla("Índices de la Base de Datos");
+      setTituloTabla(`Tabla: ${tabla} (${response.data.length} registros)`);
       
       if (response.data.length > 0) {
         setColumnasTabla(Object.keys(response.data[0]));
@@ -265,58 +252,74 @@ function App() {
         setColumnasTabla([]);
       }
     } catch (error) {
-      alert(`❌ Error cargando índices: ${error.response?.data?.error || error.message}`);
+      console.error(`Error cargando tabla ${tabla}:`, error);
+      alert(`❌ Error: ${error.response?.data?.error || error.message}`);
     }
   };
 
-  const cargarVistas = async () => {
+  const iniciarCrearRegistro = () => {
+    setModoEdicion('crear');
+    setRegistroEditando({});
+  };
+
+  const iniciarEditarRegistro = (registro) => {
+    setModoEdicion('editar');
+    setRegistroEditando({...registro});
+  };
+
+  const guardarRegistro = async () => {
     try {
-      const response = await axios.get(`${API_URL}/vistas`);
-      console.log('Vistas recibidas:', response.data);
-      setDatosTabla(response.data);
-      setTituloTabla("Vistas de la Base de Datos");
-      
-      if (response.data.length > 0) {
-        setColumnasTabla(Object.keys(response.data[0]));
-      } else {
-        setColumnasTabla([]);
+      if (modoEdicion === 'crear') {
+        const response = await axios.post(
+          `${API_URL}/admin/tablas/${tablaSeleccionada}`,
+          registroEditando
+        );
+        alert(`✅ ${response.data.mensaje}`);
+      } else if (modoEdicion === 'editar') {
+        // Obtener el ID del registro
+        const idKey = Object.keys(registroEditando).find(k => 
+          k.includes('id_') || k === 'id'
+        ) || 'id';
+        const id = registroEditando[idKey];
+        
+        const response = await axios.put(
+          `${API_URL}/admin/tablas/${tablaSeleccionada}/${id}`,
+          registroEditando
+        );
+        alert(`✅ ${response.data.mensaje}`);
       }
+      
+      // Recargar tabla
+      cargarTablaCRUD(tablaSeleccionada);
+      setModoEdicion(null);
+      setRegistroEditando({});
+      
     } catch (error) {
-      alert(`❌ Error cargando vistas: ${error.response?.data?.error || error.message}`);
+      console.error("Error guardando registro:", error);
+      alert(`❌ Error: ${error.response?.data?.error || error.message}`);
     }
   };
 
-  const cargarTriggers = async () => {
+  const eliminarRegistro = async (registro) => {
+    if (!window.confirm(`¿Está seguro de eliminar este registro?`)) return;
+    
     try {
-      const response = await axios.get(`${API_URL}/triggers`);
-      console.log('Triggers recibidos:', response.data);
-      setDatosTabla(response.data);
-      setTituloTabla("Triggers de la Base de Datos");
+      // Obtener el ID del registro
+      const idKey = Object.keys(registro).find(k => 
+        k.includes('id_') || k === 'id'
+      ) || 'id';
+      const id = registro[idKey];
       
-      if (response.data.length > 0) {
-        setColumnasTabla(Object.keys(response.data[0]));
-      } else {
-        setColumnasTabla([]);
-      }
-    } catch (error) {
-      alert(`❌ Error cargando triggers: ${error.response?.data?.error || error.message}`);
-    }
-  };
-
-  const cargarFunciones = async () => {
-    try {
-      const response = await axios.get(`${API_URL}/funciones`);
-      console.log('Funciones recibidas:', response.data);
-      setDatosTabla(response.data);
-      setTituloTabla("Funciones de la Base de Datos");
+      const response = await axios.delete(
+        `${API_URL}/admin/tablas/${tablaSeleccionada}/${id}`
+      );
       
-      if (response.data.length > 0) {
-        setColumnasTabla(Object.keys(response.data[0]));
-      } else {
-        setColumnasTabla([]);
-      }
+      alert(`✅ ${response.data.mensaje}`);
+      cargarTablaCRUD(tablaSeleccionada);
+      
     } catch (error) {
-      alert(`❌ Error cargando funciones: ${error.response?.data?.error || error.message}`);
+      console.error("Error eliminando registro:", error);
+      alert(`❌ Error: ${error.response?.data?.error || error.message}`);
     }
   };
 
@@ -340,9 +343,6 @@ function App() {
       const response = await axios.post(`${API_URL}/recepcionista/clientes`, nuevoCliente);
       alert(`✅ Cliente creado exitosamente\nID: ${response.data.data.id_cliente}\nNombre: ${response.data.data.nombre}`);
       setNuevoCliente({ nombre: "", cedula: "", telefono: "", email: "" });
-      
-      // Recargar clientes
-      adminCargarTabla("clientes");
     } catch (error) {
       console.error('❌ Error creando cliente:', error);
       alert(`❌ Error: ${error.response?.data?.error || error.message}`);
@@ -369,30 +369,44 @@ function App() {
     }
   };
 
-  const recepcionistaCrearFactura = async (idCliente, monto) => {
+  // ==================== FUNCIONES ESPECÍFICAS POR ROL ====================
+  const entrenadorVerClientes = async () => {
     try {
-      const response = await axios.post(`${API_URL}/recepcionista/facturas`, {
-        id_cliente: idCliente,
-        total: monto
-      });
-      alert(`✅ Factura creada exitosamente\nID: ${response.data.data.id_factura}`);
-      return response.data.data.id_factura;
+      const response = await axios.get(`${API_URL}/entrenador/mis-clientes`);
+      setDatosTabla(response.data);
+      setTituloTabla("Mis Clientes Asignados");
+      setClientesEntrenador(response.data);
+      if (response.data.length > 0) {
+        setColumnasTabla(Object.keys(response.data[0]));
+      }
     } catch (error) {
-      alert(`❌ Error creando factura: ${error.response?.data?.error || error.message}`);
-      return null;
+      alert(`❌ Error cargando mis clientes: ${error.response?.data?.error || error.message}`);
     }
   };
 
-  const recepcionistaRegistrarPago = async (idFactura, monto, metodo) => {
+  const nutricionistaVerEvaluaciones = async () => {
     try {
-      const response = await axios.post(`${API_URL}/recepcionista/pagos`, {
-        id_factura: idFactura,
-        monto: monto,
-        metodo_pago: metodo
-      });
-      alert(`✅ Pago registrado exitosamente\nID Pago: ${response.data.data.id_pago}`);
+      const response = await axios.get(`${API_URL}/nutricionista/mis-evaluaciones`);
+      setDatosTabla(response.data);
+      setTituloTabla("Mis Evaluaciones Nutricionales");
+      if (response.data.length > 0) {
+        setColumnasTabla(Object.keys(response.data[0]));
+      }
     } catch (error) {
-      alert(`❌ Error registrando pago: ${error.response?.data?.error || error.message}`);
+      alert(`❌ Error cargando mis evaluaciones: ${error.response?.data?.error || error.message}`);
+    }
+  };
+
+  const recepcionistaVerMembresias = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/recepcionista/membresias-activas`);
+      setDatosTabla(response.data);
+      setTituloTabla("Membresías Activas");
+      if (response.data.length > 0) {
+        setColumnasTabla(Object.keys(response.data[0]));
+      }
+    } catch (error) {
+      alert(`❌ Error cargando membresías activas: ${error.response?.data?.error || error.message}`);
     }
   };
 
@@ -456,56 +470,6 @@ function App() {
     }
   };
 
-  // ==================== FUNCIONES ESPECÍFICAS POR ROL ====================
-  const entrenadorVerClientes = async () => {
-    try {
-      const response = await axios.get(`${API_URL}/entrenador/mis-clientes`);
-      const ordenados = sortById(response.data);
-      setDatosTabla(ordenados);
-      setTituloTabla("Mis Clientes Asignados");
-
-      if (ordenados.length > 0) {
-        const primeraFila = ordenados[0];
-        setColumnasTabla(Object.keys(primeraFila));
-        setClientesEntrenador(ordenados);
-      }
-    } catch (error) {
-      alert(`❌ Error cargando mis clientes: ${error.response?.data?.error || error.message}`);
-    }
-  };
-
-  const nutricionistaVerEvaluaciones = async () => {
-    try {
-      const response = await axios.get(`${API_URL}/nutricionista/mis-evaluaciones`);
-      const ordenados = sortById(response.data);
-      setDatosTabla(ordenados);
-      setTituloTabla("Mis Evaluaciones Nutricionales");
-
-      if (ordenados.length > 0) {
-        const primeraFila = ordenados[0];
-        setColumnasTabla(Object.keys(primeraFila));
-      }
-    } catch (error) {
-      alert(`❌ Error cargando mis evaluaciones: ${error.response?.data?.error || error.message}`);
-    }
-  };
-
-  const recepcionistaVerMembresias = async () => {
-    try {
-      const response = await axios.get(`${API_URL}/recepcionista/membresias-activas`);
-      const ordenados = sortById(response.data);
-      setDatosTabla(ordenados);
-      setTituloTabla("Membresías Activas");
-
-      if (ordenados.length > 0) {
-        const primeraFila = ordenados[0];
-        setColumnasTabla(Object.keys(primeraFila));
-      }
-    } catch (error) {
-      alert(`❌ Error cargando membresías activas: ${error.response?.data?.error || error.message}`);
-    }
-  };
-
   // ==================== FUNCIONES AUXILIARES ====================
   const cerrarSesion = () => {
     setUsuarioLogueado(null);
@@ -514,8 +478,6 @@ function App() {
     setDatosTabla([]);
     setTituloTabla("");
     setColumnasTabla([]);
-    setEjerciciosSeleccionados([]);
-    setGruposSeleccionados([]);
     localStorage.removeItem("token");
     setToken("");
     alert("Sesión cerrada correctamente");
@@ -523,7 +485,7 @@ function App() {
 
   // ==================== RENDERIZADO ====================
 
-  // Renderizar tabla bonita
+  // Renderizar tabla
   const renderTabla = () => {
     if (datosTabla.length === 0 || columnasTabla.length === 0) {
       return <p style={{ color: '#666', fontStyle: 'italic' }}>No hay datos para mostrar</p>;
@@ -541,22 +503,39 @@ function App() {
                     {columna.replace(/_/g, ' ').toUpperCase()}
                   </th>
                 ))}
+                {rolActual === 'administrador' && tablaSeleccionada && (
+                  <th style={styles.th}>ACCIONES</th>
+                )}
               </tr>
             </thead>
             <tbody>
-              {datosTabla.map((fila, rowIndex) => {
-                return (
-                  <tr key={rowIndex} style={rowIndex % 2 === 0 ? styles.filaPar : styles.filaImpar}>
-                    {columnasTabla.map((columna, colIndex) => (
-                      <td key={colIndex} style={styles.td}>
-                        {typeof fila[columna] === 'object' ? 
-                         JSON.stringify(fila[columna]) : 
-                         String(fila[columna] || '')}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })}
+              {datosTabla.map((fila, rowIndex) => (
+                <tr key={rowIndex} style={rowIndex % 2 === 0 ? styles.filaPar : styles.filaImpar}>
+                  {columnasTabla.map((columna, colIndex) => (
+                    <td key={colIndex} style={styles.td}>
+                      {typeof fila[columna] === 'object' ? 
+                       JSON.stringify(fila[columna]) : 
+                       String(fila[columna] || '')}
+                    </td>
+                  ))}
+                  {rolActual === 'administrador' && tablaSeleccionada && (
+                    <td style={styles.td}>
+                      <button 
+                        style={styles.btnAccionEditar}
+                        onClick={() => iniciarEditarRegistro(fila)}
+                      >
+                        ✏️ Editar
+                      </button>
+                      <button 
+                        style={styles.btnAccionEliminar}
+                        onClick={() => eliminarRegistro(fila)}
+                      >
+                        🗑️ Eliminar
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -564,121 +543,154 @@ function App() {
     );
   };
 
-  // Renderizar panel de recepcionista
-  const renderPanelRecepcionista = () => {
+  // Renderizar formulario CRUD
+  const renderFormularioCRUD = () => {
     return (
-      <div style={styles.panelRecepcionista}>
-        <h3>Panel de Recepción</h3>
+      <div style={styles.formularioCRUD}>
+        <h3>{modoEdicion === 'crear' ? 'Crear Nuevo Registro' : 'Editar Registro'}</h3>
+        <div style={styles.formGroup}>
+          {columnasTabla
+            .filter(col => !col.includes('id_') && col !== 'id' && col !== 'fecha' && col !== 'fecha_registro' && col !== 'fecha_pago')
+            .map((columna, index) => (
+              <div key={index} style={styles.inputGroup}>
+                <label style={styles.label}>{columna.replace(/_/g, ' ').toUpperCase()}:</label>
+                <input
+                  style={styles.input}
+                  value={registroEditando[columna] || ''}
+                  onChange={(e) => setRegistroEditando({
+                    ...registroEditando,
+                    [columna]: e.target.value
+                  })}
+                  placeholder={`Ingrese ${columna}`}
+                />
+              </div>
+            ))}
+        </div>
+        <div style={styles.botonesForm}>
+          <button style={styles.btnGuardar} onClick={guardarRegistro}>
+            {modoEdicion === 'crear' ? 'Crear Registro' : 'Actualizar Registro'}
+          </button>
+          <button style={styles.btnCancelar} onClick={() => setModoEdicion(null)}>
+            Cancelar
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  // Renderizar panel de búsqueda por índice
+  const renderBusquedaPorIndice = () => {
+    return (
+      <div style={styles.panelBusqueda}>
+        <h3>🔍 Buscar Cliente por Cédula (Usando Índice)</h3>
+        <div style={styles.formGroup}>
+          <input
+            style={styles.input}
+            placeholder="Ingrese cédula del cliente"
+            value={cedulaBuscar}
+            onChange={(e) => setCedulaBuscar(e.target.value)}
+          />
+          <button style={styles.btnAccion} onClick={buscarClientePorCedula}>
+            Buscar
+          </button>
+        </div>
         
-        <div style={styles.seccionRecepcion}>
-          <h4>📝 Registrar Nuevo Cliente</h4>
-          <div style={styles.formGroup}>
-            <input
-              style={styles.input}
-              placeholder="Nombre completo"
-              value={nuevoCliente.nombre}
-              onChange={(e) => setNuevoCliente({...nuevoCliente, nombre: e.target.value})}
-            />
-            <input
-              style={styles.input}
-              placeholder="Cédula"
-              value={nuevoCliente.cedula}
-              onChange={(e) => setNuevoCliente({...nuevoCliente, cedula: e.target.value})}
-            />
-            <input
-              style={styles.input}
-              placeholder="Teléfono"
-              value={nuevoCliente.telefono}
-              onChange={(e) => setNuevoCliente({...nuevoCliente, telefono: e.target.value})}
-            />
-            <input
-              style={styles.input}
-              placeholder="Email"
-              type="email"
-              value={nuevoCliente.email}
-              onChange={(e) => setNuevoCliente({...nuevoCliente, email: e.target.value})}
-            />
-            <button style={styles.btnAccion} onClick={recepcionistaCrearCliente}>
-              Registrar Cliente
-            </button>
+        {resultadoBusqueda && (
+          <div style={styles.resultadoBusqueda}>
+            <h4>✅ Cliente Encontrado:</h4>
+            <div style={styles.cardCliente}>
+              <p><strong>Nombre:</strong> {resultadoBusqueda.nombre}</p>
+              <p><strong>Cédula:</strong> {resultadoBusqueda.cedula}</p>
+              <p><strong>Teléfono:</strong> {resultadoBusqueda.telefono}</p>
+              <p><strong>Email:</strong> {resultadoBusqueda.email}</p>
+              <p><strong>Fecha Registro:</strong> {resultadoBusqueda.fecha_registro}</p>
+              <p><strong>Estado Membresía:</strong> {resultadoBusqueda.estado_membresia || 'No activa'}</p>
+              <p><strong>Total Rutinas:</strong> {resultadoBusqueda.total_rutinas}</p>
+            </div>
           </div>
-        </div>
+        )}
+      </div>
+    );
+  };
 
-        <div style={styles.seccionRecepcion}>
-          <h4>🎟️ Crear Inscripción a Membresía</h4>
-          <div style={styles.formGroup}>
-            <input
-              style={styles.input}
-              placeholder="ID Cliente"
-              type="number"
-              value={inscripcionData.id_cliente}
-              onChange={(e) => setInscripcionData({...inscripcionData, id_cliente: e.target.value})}
-            />
-            <select
-              style={styles.input}
-              value={inscripcionData.id_membresia}
-              onChange={(e) => setInscripcionData({...inscripcionData, id_membresia: e.target.value})}
-            >
-              <option value="">Seleccionar membresía</option>
-              {membresiasDisponibles.map(m => (
-                <option key={m.id_membresia} value={m.id_membresia}>
-                  {m.nombre} - ${m.precio}
-                </option>
-              ))}
-            </select>
-            <input
-              style={styles.input}
-              type="date"
-              value={inscripcionData.fecha_inicio}
-              onChange={(e) => setInscripcionData({...inscripcionData, fecha_inicio: e.target.value})}
-            />
-            <button style={styles.btnAccion} onClick={recepcionistaCrearInscripcion}>
-              Crear Inscripción
-            </button>
-          </div>
+  // Renderizar panel de auditoría
+  const renderPanelAuditoria = () => {
+    return (
+      <div style={styles.panelAuditoria}>
+        <h3>📊 Auditoría del Sistema</h3>
+        <div style={styles.filtrosAuditoria}>
+          <input
+            style={styles.input}
+            placeholder="Tabla (ej: cliente)"
+            value={filtroAuditoria.tabla}
+            onChange={(e) => setFiltroAuditoria({...filtroAuditoria, tabla: e.target.value})}
+          />
+          <input
+            style={styles.input}
+            type="date"
+            placeholder="Fecha desde"
+            value={filtroAuditoria.fecha_desde}
+            onChange={(e) => setFiltroAuditoria({...filtroAuditoria, fecha_desde: e.target.value})}
+          />
+          <input
+            style={styles.input}
+            type="date"
+            placeholder="Fecha hasta"
+            value={filtroAuditoria.fecha_hasta}
+            onChange={(e) => setFiltroAuditoria({...filtroAuditoria, fecha_hasta: e.target.value})}
+          />
+          <button style={styles.btnAccion} onClick={cargarAuditoria}>
+            Cargar Auditoría
+          </button>
         </div>
+      </div>
+    );
+  };
 
-        <div style={styles.seccionRecepcion}>
-          <h4>💸 Generar Factura y Pago</h4>
-          <div style={styles.formGroup}>
-            <input
-              style={styles.input}
-              placeholder="ID Cliente"
-              type="number"
-              id="facturaCliente"
-            />
-            <input
-              style={styles.input}
-              placeholder="Monto"
-              type="number"
-              step="0.01"
-              id="facturaMonto"
-            />
-            <select style={styles.input} id="facturaMetodo">
-              <option value="Efectivo">Efectivo</option>
-              <option value="Tarjeta Débito">Tarjeta Débito</option>
-              <option value="Tarjeta Crédito">Tarjeta Crédito</option>
-              <option value="Transferencia Bancaria">Transferencia Bancaria</option>
-              <option value="Débito Automático">Débito Automático</option>
-            </select>
-            <button style={styles.btnAccion} onClick={async () => {
-              const idCliente = document.getElementById('facturaCliente').value;
-              const monto = document.getElementById('facturaMonto').value;
-              const metodo = document.getElementById('facturaMetodo').value;
-              
-              if (!idCliente || !monto) {
-                alert("Complete todos los campos");
-                return;
-              }
-              
-              const idFactura = await recepcionistaCrearFactura(idCliente, monto);
-              if (idFactura) {
-                await recepcionistaRegistrarPago(idFactura, monto, metodo);
-              }
-            }}>
-              Generar Factura y Pago
-            </button>
-          </div>
+  // Renderizar panel de funciones
+  const renderPanelFunciones = () => {
+    return (
+      <div style={styles.panelFunciones}>
+        <h3>⚡ Ejecutar Funciones de PostgreSQL</h3>
+        <div style={styles.formGroup}>
+          <select
+            style={styles.input}
+            value={funcionSeleccionada}
+            onChange={(e) => setFuncionSeleccionada(e.target.value)}
+          >
+            <option value="">Seleccionar función</option>
+            <option value="mantenimiento_automatico">Mantenimiento Automático</option>
+            <option value="registrar_pago">Registrar Pago</option>
+          </select>
+          
+          {funcionSeleccionada === 'registrar_pago' && (
+            <>
+              <input
+                style={styles.input}
+                placeholder="ID Factura"
+                value={parametrosFuncion.id_factura || ''}
+                onChange={(e) => setParametrosFuncion({...parametrosFuncion, id_factura: e.target.value})}
+              />
+              <input
+                style={styles.input}
+                placeholder="Monto"
+                type="number"
+                step="0.01"
+                value={parametrosFuncion.monto || ''}
+                onChange={(e) => setParametrosFuncion({...parametrosFuncion, monto: e.target.value})}
+              />
+              <input
+                style={styles.input}
+                placeholder="Método (opcional)"
+                value={parametrosFuncion.metodo || ''}
+                onChange={(e) => setParametrosFuncion({...parametrosFuncion, metodo: e.target.value})}
+              />
+            </>
+          )}
+          
+          <button style={styles.btnAccion} onClick={ejecutarFuncion}>
+            Ejecutar Función
+          </button>
         </div>
       </div>
     );
@@ -693,53 +705,79 @@ function App() {
 
         {/* Botones según rol */}
         <div style={styles.botonesDashboard}>
-          {/* Administrador */}
+          {/* Administrador - CRUD COMPLETO */}
           {rolActual === 'administrador' && (
             <>
-              <button style={styles.btnDashboard} onClick={() => adminIniciarCRUD("clientes")}>👥 Gestionar Clientes</button>
-              <button style={styles.btnDashboard} onClick={() => adminIniciarCRUD("membresias")}>🎟️ Gestionar Membresías</button>
-              <button style={styles.btnDashboard} onClick={() => adminIniciarCRUD("entrenadores")}>🏅 Gestionar Entrenadores</button>
-              <button style={styles.btnDashboard} onClick={() => adminIniciarCRUD("nutricionistas")}>🥗 Gestionar Nutricionistas</button>
-              <button style={styles.btnDashboard} onClick={() => adminIniciarCRUD("ejercicios")}>🏋️ Gestionar Ejercicios</button>
-              <button style={styles.btnDashboard} onClick={() => adminIniciarCRUD("rutinas")}>📋 Gestionar Rutinas</button>
-              <button style={styles.btnDashboard} onClick={() => adminCargarTabla("inscripciones")}>📝 Ver Inscripciones</button>
-              <button style={styles.btnDashboard} onClick={() => adminCargarTabla("facturas")}>💸 Ver Facturas</button>
-              <button style={styles.btnDashboard} onClick={() => adminCargarTabla("pagos")}>💰 Ver Pagos</button>
-              <button style={styles.btnDashboard} onClick={() => adminCargarTabla("evaluaciones")}>🧪 Ver Evaluaciones</button>
-              <button style={styles.btnDashboard} onClick={() => adminCargarTabla("dietas")}>🍽️ Ver Dietas</button>
-              
-              {/* Índices, Vistas, Triggers y Funciones */}
-              <button style={styles.btnDashboard} onClick={cargarIndices}>📊 Ver Índices</button>
-              <button style={styles.btnDashboard} onClick={cargarVistas}>👁️ Ver Vistas</button>
-              <button style={styles.btnDashboard} onClick={cargarTriggers}>⚡ Ver Triggers</button>
-              <button style={styles.btnDashboard} onClick={cargarFunciones}>🔧 Ver Funciones</button>
+              <button style={styles.btnDashboard} onClick={cargarTablasDisponibles}>
+                📋 Ver Tablas Disponibles
+              </button>
+              <button style={styles.btnDashboard} onClick={() => cargarAuditoria()}>
+                📊 Ver Auditoría
+              </button>
+              <button style={styles.btnDashboard} onClick={() => {
+                setTituloTabla("Buscar por Índice");
+                setDatosTabla([]);
+              }}>
+                🔍 Búsqueda por Índice
+              </button>
+              <button style={styles.btnDashboard} onClick={() => {
+                setTituloTabla("Ejecutar Funciones");
+                setDatosTabla([]);
+              }}>
+                ⚡ Ejecutar Funciones
+              </button>
             </>
           )}
 
           {/* Recepcionista */}
           {rolActual === 'recepcionista' && (
             <>
+              <button style={styles.btnDashboard} onClick={() => recepcionistaVerMembresias()}>
+                🎟️ Ver Membresías Activas
+              </button>
               <button style={styles.btnDashboard} onClick={() => {
-                adminCargarTabla("clientes");
+                setTituloTabla("Registrar Cliente");
+                setDatosTabla([]);
+              }}>
+                📝 Registrar Cliente
+              </button>
+              <button style={styles.btnDashboard} onClick={() => {
+                setTituloTabla("Crear Inscripción");
+                setDatosTabla([]);
                 recepcionistaCargarMembresias();
-              }}>👥 Ver Clientes</button>
-              <button style={styles.btnDashboard} onClick={() => recepcionistaVerMembresias()}>🎟️ Ver Membresías Activas</button>
-              <button style={styles.btnDashboard} onClick={() => adminCargarTabla("inscripciones")}>📝 Ver Inscripciones</button>
-              <button style={styles.btnDashboard} onClick={() => adminCargarTabla("facturas")}>💸 Ver Facturas</button>
-              <button style={styles.btnDashboard} onClick={() => adminCargarTabla("pagos")}>💰 Ver Pagos</button>
-              
-              {/* Índices y Vistas para recepcionista */}
-              <button style={styles.btnDashboard} onClick={cargarIndices}>📊 Ver Índices</button>
-              <button style={styles.btnDashboard} onClick={cargarVistas}>👁️ Ver Vistas</button>
+              }}>
+                📋 Crear Inscripción
+              </button>
+              <button style={styles.btnDashboard} onClick={() => buscarClientePorCedula()}>
+                🔍 Buscar por Cédula
+              </button>
             </>
           )}
 
           {/* Entrenador */}
           {rolActual === 'entrenador' && (
             <>
-              <button style={styles.btnDashboard} onClick={entrenadorVerClientes}>👥 Ver Mis Clientes</button>
-              <button style={styles.btnDashboard} onClick={() => adminCargarTabla("ejercicios")}>🏋️ Ver Ejercicios</button>
-              <button style={styles.btnDashboard} onClick={() => adminCargarTabla("rutinas")}>📋 Ver Todas las Rutinas</button>
+              <button style={styles.btnDashboard} onClick={entrenadorVerClientes}>
+                👥 Ver Mis Clientes
+              </button>
+              <button style={styles.btnDashboard} onClick={() => {
+                setTituloTabla("Ver Ejercicios");
+                axios.get(`${API_URL}/ejercicios-todos`).then(res => {
+                  setDatosTabla(res.data);
+                  if (res.data.length > 0) setColumnasTabla(Object.keys(res.data[0]));
+                });
+              }}>
+                🏋️ Ver Ejercicios
+              </button>
+              <button style={styles.btnDashboard} onClick={() => {
+                setTituloTabla("Ver Rutinas");
+                axios.get(`${API_URL}/rutinas-todas`).then(res => {
+                  setDatosTabla(res.data);
+                  if (res.data.length > 0) setColumnasTabla(Object.keys(res.data[0]));
+                });
+              }}>
+                📋 Ver Todas las Rutinas
+              </button>
               <button
                 style={styles.btnDashboard}
                 onClick={async () => {
@@ -750,39 +788,175 @@ function App() {
               >
                 ➕ Crear Nueva Rutina
               </button>
-              
-              {/* Índices y Vistas para entrenador */}
-              <button style={styles.btnDashboard} onClick={cargarIndices}>📊 Ver Índices</button>
-              <button style={styles.btnDashboard} onClick={cargarVistas}>👁️ Ver Vistas</button>
             </>
           )}
 
           {/* Nutricionista */}
           {rolActual === 'nutricionista' && (
             <>
-              <button style={styles.btnDashboard} onClick={nutricionistaVerEvaluaciones}>🧪 Ver Mis Evaluaciones</button>
-              <button style={styles.btnDashboard} onClick={() => adminCargarTabla("dietas")}>🥗 Ver Todas las Dietas</button>
-              <button style={styles.btnDashboard} onClick={() => adminCargarTabla("evaluaciones")}>📊 Ver Todas las Evaluaciones</button>
-              
-              {/* Índices y Vistas para nutricionista */}
-              <button style={styles.btnDashboard} onClick={cargarIndices}>📊 Ver Índices</button>
-              <button style={styles.btnDashboard} onClick={cargarVistas}>👁️ Ver Vistas</button>
+              <button style={styles.btnDashboard} onClick={nutricionistaVerEvaluaciones}>
+                🧪 Ver Mis Evaluaciones
+              </button>
+              <button style={styles.btnDashboard} onClick={() => {
+                setTituloTabla("Ver Dietas");
+                axios.get(`${API_URL}/dietas-todas`).then(res => {
+                  setDatosTabla(res.data);
+                  if (res.data.length > 0) setColumnasTabla(Object.keys(res.data[0]));
+                });
+              }}>
+                🥗 Ver Todas las Dietas
+              </button>
+              <button style={styles.btnDashboard} onClick={() => buscarClientePorCedula()}>
+                🔍 Buscar Cliente
+              </button>
             </>
           )}
 
           <button style={styles.btnCerrarSesion} onClick={cerrarSesion}>🚪 Cerrar Sesión</button>
         </div>
 
-        {/* Panel de Recepcionista */}
-        {rolActual === 'recepcionista' && renderPanelRecepcionista()}
+        {/* Panel de Administrador - Tablas CRUD */}
+        {rolActual === 'administrador' && tablasDisponibles.length > 0 && (
+          <div style={styles.panelCRUD}>
+            <h3>📁 CRUD Completo - Seleccionar Tabla</h3>
+            <div style={styles.tablasContainer}>
+              {tablasDisponibles.map(tabla => (
+                <button
+                  key={tabla}
+                  style={styles.btnTabla}
+                  onClick={() => cargarTablaCRUD(tabla)}
+                >
+                  {tabla}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Filtros para búsqueda en tablas (Admin) */}
+        {rolActual === 'administrador' && tablaSeleccionada && (
+          <div style={styles.filtrosBusqueda}>
+            <input
+              style={styles.input}
+              placeholder="Texto a buscar"
+              value={filtroBusqueda}
+              onChange={(e) => setFiltroBusqueda(e.target.value)}
+            />
+            <input
+              style={styles.input}
+              placeholder="Campo donde buscar"
+              value={campoBusqueda}
+              onChange={(e) => setCampoBusqueda(e.target.value)}
+            />
+            <button style={styles.btnAccion} onClick={() => cargarTablaCRUD(tablaSeleccionada)}>
+              🔍 Buscar
+            </button>
+            <button style={styles.btnAccion} onClick={() => {
+              setFiltroBusqueda("");
+              setCampoBusqueda("");
+              cargarTablaCRUD(tablaSeleccionada);
+            }}>
+              🔄 Limpiar
+            </button>
+            <button style={styles.btnCrearNuevo} onClick={iniciarCrearRegistro}>
+              ➕ Crear Nuevo
+            </button>
+          </div>
+        )}
+
+        {/* Panel de Búsqueda por Índice */}
+        {(tituloTabla === "Buscar por Índice" || rolActual === 'recepcionista') && renderBusquedaPorIndice()}
+
+        {/* Panel de Auditoría (solo admin) */}
+        {rolActual === 'administrador' && tituloTabla !== "Buscar por Índice" && renderPanelAuditoria()}
+
+        {/* Panel de Funciones (solo admin) */}
+        {rolActual === 'administrador' && tituloTabla === "Ejecutar Funciones" && renderPanelFunciones()}
+
+        {/* Panel de Recepcionista - Registrar Cliente */}
+        {rolActual === 'recepcionista' && tituloTabla === "Registrar Cliente" && (
+          <div style={styles.panelRecepcionista}>
+            <h3>📝 Registrar Nuevo Cliente</h3>
+            <div style={styles.formGroup}>
+              <input
+                style={styles.input}
+                placeholder="Nombre completo"
+                value={nuevoCliente.nombre}
+                onChange={(e) => setNuevoCliente({...nuevoCliente, nombre: e.target.value})}
+              />
+              <input
+                style={styles.input}
+                placeholder="Cédula"
+                value={nuevoCliente.cedula}
+                onChange={(e) => setNuevoCliente({...nuevoCliente, cedula: e.target.value})}
+              />
+              <input
+                style={styles.input}
+                placeholder="Teléfono"
+                value={nuevoCliente.telefono}
+                onChange={(e) => setNuevoCliente({...nuevoCliente, telefono: e.target.value})}
+              />
+              <input
+                style={styles.input}
+                placeholder="Email"
+                type="email"
+                value={nuevoCliente.email}
+                onChange={(e) => setNuevoCliente({...nuevoCliente, email: e.target.value})}
+              />
+              <button style={styles.btnAccion} onClick={recepcionistaCrearCliente}>
+                Registrar Cliente
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Panel de Recepcionista - Crear Inscripción */}
+        {rolActual === 'recepcionista' && tituloTabla === "Crear Inscripción" && (
+          <div style={styles.panelRecepcionista}>
+            <h3>🎟️ Crear Inscripción a Membresía</h3>
+            <div style={styles.formGroup}>
+              <input
+                style={styles.input}
+                placeholder="ID Cliente"
+                type="number"
+                value={inscripcionData.id_cliente}
+                onChange={(e) => setInscripcionData({...inscripcionData, id_cliente: e.target.value})}
+              />
+              <select
+                style={styles.input}
+                value={inscripcionData.id_membresia}
+                onChange={(e) => setInscripcionData({...inscripcionData, id_membresia: e.target.value})}
+              >
+                <option value="">Seleccionar membresía</option>
+                {membresiasDisponibles.map(m => (
+                  <option key={m.id_membresia} value={m.id_membresia}>
+                    {m.nombre} - ${m.precio}
+                  </option>
+                ))}
+              </select>
+              <input
+                style={styles.input}
+                type="date"
+                value={inscripcionData.fecha_inicio}
+                onChange={(e) => setInscripcionData({...inscripcionData, fecha_inicio: e.target.value})}
+              />
+              <button style={styles.btnAccion} onClick={recepcionistaCrearInscripcion}>
+                Crear Inscripción
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Formulario CRUD para Administrador */}
+        {rolActual === 'administrador' && modoEdicion && renderFormularioCRUD()}
 
         {/* Mostrar tabla si hay datos */}
-        {tituloTabla && renderTabla()}
+        {tituloTabla && datosTabla.length > 0 && renderTabla()}
       </div>
     );
   };
 
-  // Renderizar selección de ejercicios
+  // Renderizar selección de ejercicios (igual que antes)
   const renderSeleccionEjercicios = () => {
     return (
       <div style={styles.seleccionContainer}>
@@ -1005,7 +1179,7 @@ function App() {
   );
 }
 
-// ESTILOS
+// ESTILOS (actualizados)
 const styles = {
   fondo: {
     minHeight: "100vh",
@@ -1159,28 +1333,49 @@ const styles = {
   filaImpar: {
     backgroundColor: "white",
   },
-  panelRecepcionista: {
+  btnAccionEditar: {
+    padding: "5px 10px",
+    backgroundColor: "#f39c12",
+    color: "white",
+    border: "none",
+    borderRadius: "4px",
+    cursor: "pointer",
+    marginRight: "5px",
+  },
+  btnAccionEliminar: {
+    padding: "5px 10px",
+    backgroundColor: "#e74c3c",
+    color: "white",
+    border: "none",
+    borderRadius: "4px",
+    cursor: "pointer",
+  },
+  panelCRUD: {
     backgroundColor: "#f8f9fa",
     padding: "20px",
     borderRadius: "8px",
     marginTop: "20px",
   },
-  seccionRecepcion: {
-    marginBottom: "30px",
-    padding: "15px",
-    backgroundColor: "white",
-    borderRadius: "6px",
-    boxShadow: "0 2px 5px rgba(0,0,0,0.1)",
-  },
-  formGroup: {
-    display: "flex",
-    flexDirection: "column",
+  tablasContainer: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
     gap: "10px",
+    marginTop: "10px",
   },
-  label: {
-    textAlign: "left",
-    fontWeight: "bold",
-    color: "#2c3e50",
+  btnTabla: {
+    padding: "10px",
+    backgroundColor: "#3498db",
+    color: "white",
+    border: "none",
+    borderRadius: "6px",
+    cursor: "pointer",
+    fontSize: "12px",
+  },
+  filtrosBusqueda: {
+    display: "flex",
+    gap: "10px",
+    marginTop: "20px",
+    alignItems: "center",
   },
   btnAccion: {
     padding: "10px 20px",
@@ -1189,8 +1384,98 @@ const styles = {
     border: "none",
     borderRadius: "6px",
     cursor: "pointer",
+  },
+  btnCrearNuevo: {
+    padding: "10px 20px",
+    backgroundColor: "#27ae60",
+    color: "white",
+    border: "none",
+    borderRadius: "6px",
+    cursor: "pointer",
+    marginLeft: "auto",
+  },
+  formularioCRUD: {
+    backgroundColor: "#f8f9fa",
+    padding: "20px",
+    borderRadius: "8px",
+    marginTop: "20px",
+  },
+  formGroup: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "10px",
+  },
+  inputGroup: {
+    marginBottom: "15px",
+  },
+  label: {
+    display: "block",
+    marginBottom: "5px",
+    fontWeight: "bold",
+    color: "#2c3e50",
+    textAlign: "left",
+  },
+  botonesForm: {
+    display: "flex",
+    gap: "10px",
+    marginTop: "20px",
+  },
+  btnGuardar: {
+    padding: "10px 20px",
+    backgroundColor: "#27ae60",
+    color: "white",
+    border: "none",
+    borderRadius: "6px",
+    cursor: "pointer",
+  },
+  btnCancelar: {
+    padding: "10px 20px",
+    backgroundColor: "#95a5a6",
+    color: "white",
+    border: "none",
+    borderRadius: "6px",
+    cursor: "pointer",
+  },
+  panelBusqueda: {
+    backgroundColor: "#f8f9fa",
+    padding: "20px",
+    borderRadius: "8px",
+    marginTop: "20px",
+  },
+  resultadoBusqueda: {
+    marginTop: "20px",
+    padding: "15px",
+    backgroundColor: "white",
+    borderRadius: "8px",
+    boxShadow: "0 2px 5px rgba(0,0,0,0.1)",
+  },
+  cardCliente: {
+    textAlign: "left",
+  },
+  panelAuditoria: {
+    backgroundColor: "#f8f9fa",
+    padding: "20px",
+    borderRadius: "8px",
+    marginTop: "20px",
+  },
+  filtrosAuditoria: {
+    display: "flex",
+    gap: "10px",
     marginTop: "10px",
   },
+  panelFunciones: {
+    backgroundColor: "#f8f9fa",
+    padding: "20px",
+    borderRadius: "8px",
+    marginTop: "20px",
+  },
+  panelRecepcionista: {
+    backgroundColor: "#f8f9fa",
+    padding: "20px",
+    borderRadius: "8px",
+    marginTop: "20px",
+  },
+  // Estilos para selección de ejercicios (mantener igual)
   seleccionContainer: {
     display: "flex",
     flexDirection: "column",
