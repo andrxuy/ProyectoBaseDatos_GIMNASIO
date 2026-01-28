@@ -898,52 +898,47 @@ app.get('/api/auditoria', authenticate, authorize('administrador'), async (req, 
   }
 });
 
-// 26) Ejecutar función específica (solo admin)
+// 26) Ejecutar función específica (solo admin) - MODIFICADA
 app.post('/api/ejecutar-funcion/:nombre', authenticate, authorize('administrador'), async (req, res) => {
   try {
     const { nombre } = req.params;
     const { parametros } = req.body;
     
-    // Validar funciones permitidas
+    // Validar funciones permitidas (solo pago ahora)
     const funcionesPermitidas = [
-      'mantenimiento_automatico',
-      'registrar_pago',
-      'calcular_imc',
-      'actualizar_estado_membresia'
+      'registrar_pago_simple'
     ];
     
     if (!funcionesPermitidas.includes(nombre)) {
-      return res.status(400).json({ error: 'Función no permitida' });
+      return res.status(400).json({ error: 'Función no permitida. Solo se permite: registrar_pago_simple' });
     }
     
     let query = '';
     let result;
     
     switch (nombre) {
-      case 'mantenimiento_automatico':
-        query = 'CALL mantenimiento_automatico()';
-        result = await pool.query(query);
-        return res.json({ 
-          success: true, 
-          mensaje: '✅ Mantenimiento automático ejecutado',
-          data: result.rows 
-        });
-        
-      case 'registrar_pago':
+      case 'registrar_pago_simple':
         if (!parametros || !parametros.id_factura || !parametros.monto) {
           return res.status(400).json({ error: 'Parámetros faltantes: id_factura, monto' });
         }
-        query = 'CALL registrar_pago($1, $2, $3)';
-        result = await pool.query(query, [
-          parametros.id_factura,
-          parametros.monto,
+        query = 'SELECT registrar_pago_simple($1, $2, $3) as resultado';
+        const dbResult = await pool.query(query, [
+          parseInt(parametros.id_factura),
+          parseFloat(parametros.monto),
           parametros.metodo || 'Efectivo'
         ]);
-        return res.json({ 
-          success: true, 
-          mensaje: '✅ Pago registrado exitosamente',
-          data: result.rows 
-        });
+        
+        const funcionResult = dbResult.rows[0].resultado;
+        
+        if (funcionResult.success) {
+          return res.json({ 
+            success: true, 
+            mensaje: '✅ Pago registrado exitosamente',
+            data: funcionResult 
+          });
+        } else {
+          return res.status(400).json({ error: funcionResult.message });
+        }
         
       default:
         return res.status(400).json({ error: 'Función no implementada' });
