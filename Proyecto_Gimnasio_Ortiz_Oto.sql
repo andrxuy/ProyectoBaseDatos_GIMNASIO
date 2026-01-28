@@ -1159,3 +1159,100 @@ AFTER INSERT OR UPDATE OR DELETE ON cliente_auth
 FOR EACH ROW
 EXECUTE FUNCTION trigger_auditoria();
 
+
+
+/*AGREGADO PARA EL FRONT*/
+-- CORRECCIÓN DE PERMISOS PARA RECEPCIONISTA
+
+-- 1. Dar permisos INSERT y UPDATE a recepcionista en cliente
+GRANT INSERT, UPDATE ON cliente TO rol_recepcionista;
+
+-- 2. Dar permisos INSERT en factura y pago
+GRANT INSERT ON factura TO rol_recepcionista;
+GRANT INSERT ON pago TO rol_recepcionista;
+
+-- 3. Dar permisos en inscripcion_membresia
+GRANT INSERT ON inscripcion_membresia TO rol_recepcionista;
+
+-- 4. Dar acceso a secuencias
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO rol_recepcionista;
+
+-- CORRECCIÓN DE VISTAS Y TRIGGERS EN FRONTEND
+
+-- 5. Crear vista para ver índices más detallada
+CREATE OR REPLACE VIEW vista_indices_detalle AS
+SELECT 
+  schemaname,
+  tablename,
+  indexname,
+  indexdef,
+  pg_relation_size(indexname::regclass) as tamaño_bytes
+FROM pg_indexes 
+WHERE schemaname = 'public'
+ORDER BY tablename, indexname;
+
+-- 6. Crear vista para triggers más detallada
+CREATE OR REPLACE VIEW vista_triggers_detalle AS
+SELECT 
+  trigger_schema,
+  trigger_name,
+  event_manipulation,
+  event_object_table,
+  action_statement,
+  action_timing
+FROM information_schema.triggers 
+WHERE trigger_schema = 'public'
+ORDER BY event_object_table, trigger_name;
+
+-- 7. Crear vista para funciones más detallada
+CREATE OR REPLACE VIEW vista_funciones_detalle AS
+SELECT 
+  routine_schema,
+  routine_name,
+  data_type,
+  routine_definition,
+  external_language,
+  is_deterministic
+FROM information_schema.routines 
+WHERE routine_schema = 'public'
+  AND routine_type = 'FUNCTION'
+ORDER BY routine_name;
+
+-- PERMISOS PARA LAS NUEVAS VISTAS
+
+GRANT SELECT ON vista_indices_detalle TO rol_administrador;
+GRANT SELECT ON vista_triggers_detalle TO rol_administrador;
+GRANT SELECT ON vista_funciones_detalle TO rol_administrador;
+GRANT SELECT ON vista_indices_detalle TO rol_recepcionista;
+GRANT SELECT ON vista_indices_detalle TO rol_entrenador;
+GRANT SELECT ON vista_indices_detalle TO rol_nutricionista;
+
+-- FUNCIÓN PARA REGISTRAR CLIENTE SEGURO
+
+CREATE OR REPLACE FUNCTION registrar_cliente_seguro(
+  p_nombre VARCHAR(120),
+  p_cedula VARCHAR(20),
+  p_telefono VARCHAR(20),
+  p_email VARCHAR(150)
+) RETURNS INTEGER AS $$
+DECLARE
+  nuevo_id INTEGER;
+BEGIN
+  INSERT INTO cliente (nombre, cedula, telefono, email, fecha_registro)
+  VALUES (p_nombre, p_cedula, p_telefono, p_email, CURRENT_DATE)
+  RETURNING id_cliente INTO nuevo_id;
+  
+  RETURN nuevo_id;
+  
+EXCEPTION WHEN OTHERS THEN
+  RAISE EXCEPTION 'Error registrando cliente: %', SQLERRM;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Dar permisos para usar la función
+GRANT EXECUTE ON FUNCTION registrar_cliente_seguro TO rol_recepcionista;
+GRANT EXECUTE ON FUNCTION registrar_cliente_seguro TO rol_administrador;
+
+
+
+
