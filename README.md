@@ -25,5 +25,3 @@ Permite gestionar información de clientes, entrenadores, rutinas, nutricionista
 ---
 
 
-```bash
-git clone <URL_DEL_REPOSITORIO>
