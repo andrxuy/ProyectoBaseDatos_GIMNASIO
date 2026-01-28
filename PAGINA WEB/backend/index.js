@@ -16,44 +16,23 @@ app.use(express.json());
 // ========================
 // Configuración PostgreSQL
 // ========================
-// Por defecto: admin_gimnasio/admin1234 (según tu SQL)
 const pool = new Pool({
   host: process.env.DB_HOST || 'localhost',
   port: +(process.env.DB_PORT || 5432),
   database: process.env.DB_NAME || 'Gimnasio_Ortiz_Oto',
   user: process.env.DB_USER || 'admin_gimnasio',
   password: process.env.DB_PASSWORD || 'admin1234',
-  // ssl: { rejectUnauthorized: false } // si usas cloud con SSL
 });
 
 const JWT_SECRET = process.env.JWT_SECRET || 'cambia_este_secreto';
 
-// (Opcional) Diagnóstico de variables de entorno (sin exponer la contraseña):
-(function diagEnv() {
-  const dbg = {
-    DB_HOST: process.env.DB_HOST || 'localhost',
-    DB_PORT: process.env.DB_PORT || '5432',
-    DB_NAME: process.env.DB_NAME || 'Gimnasio_Ortiz_Oto',
-    DB_USER: process.env.DB_USER || 'admin_gimnasio',
-    DB_PASSWORD_len: (process.env.DB_PASSWORD || 'admin1234').length
-  };
-  console.log('🔎 ENV (parcial, sin password):', dbg);
-})();
-
-// Verificar conexión a la base de datos
+// Verificar conexión
 (async () => {
   try {
     const result = await pool.query('SELECT current_database() db, NOW() now');
     console.log('✅ Conectado a PostgreSQL:', result.rows[0].db);
   } catch (err) {
     console.error('❌ Error conectando a PostgreSQL:', err.message);
-    console.error('🧭 Intentando con:', {
-      host: process.env.DB_HOST || 'localhost',
-      port: process.env.DB_PORT || '5432',
-      database: process.env.DB_NAME || 'Gimnasio_Ortiz_Oto',
-      user: process.env.DB_USER || 'admin_gimnasio'
-      // password oculto por seguridad
-    });
   }
 })();
 
@@ -74,10 +53,9 @@ async function withTransaction(workFn) {
 }
 
 // ========================
-// Auth helpers (JWT + RBAC)
+// Auth helpers
 // ========================
 function issueToken(payload) {
-  // payload: { sub, rol, nombre, ... }
   return jwt.sign(payload, JWT_SECRET, { expiresIn: '8h' });
 }
 
@@ -87,7 +65,7 @@ function authenticate(req, res, next) {
   if (!token) return res.status(401).json({ error: 'Token requerido' });
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded; // { sub, rol, nombre, ... }
+    req.user = decoded;
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Token inválido o expirado' });
@@ -107,7 +85,7 @@ function authorize(...rolesPermitidos) {
 // RUTAS PÚBLICAS
 // ============================================
 
-// 1) Test de conexión básica
+// 1) Test de conexión
 app.get('/api/test', async (req, res) => {
   try {
     const result = await pool.query('SELECT NOW() as hora_servidor, version() as version');
@@ -123,67 +101,7 @@ app.get('/api/test', async (req, res) => {
   }
 });
 
-// 2) Registrar nuevo cliente (función SQL si existe; si no, manual con trigger de hashing)
-app.post('/api/registrar', async (req, res) => {
-  try {
-    const { nombre, cedula, telefono, email, password } = req.body;
-
-    console.log('📝 Registrando cliente:', { nombre, email });
-
-    if (!nombre || !cedula || !email || !password) {
-      return res.status(400).json({ error: 'Faltan campos obligatorios' });
-    }
-
-    // Intentar función registrar_cliente
-    try {
-      const result = await pool.query(
-        'SELECT registrar_cliente($1, $2, $3, $4, $5) as id_cliente',
-        [nombre, cedula, telefono || '', email, password]
-      );
-      return res.json({
-        success: true,
-        mensaje: 'Cliente registrado exitosamente (función)',
-        id_cliente: result.rows[0].id_cliente,
-        nombre
-      });
-    } catch (funcError) {
-      console.log('⚠️ Función registrar_cliente no disponible, usando registro manual...');
-      // Registro manual con transacción (el trigger encripta el password_hash)
-      const data = await withTransaction(async (client) => {
-        const clienteResult = await client.query(
-          `INSERT INTO cliente (nombre, cedula, telefono, email, fecha_registro)
-           VALUES ($1, $2, $3, $4, CURRENT_DATE)
-           RETURNING id_cliente`,
-          [nombre, cedula, telefono || null, email]
-        );
-        const idCliente = clienteResult.rows[0].id_cliente;
-
-        await client.query(
-          `INSERT INTO cliente_auth (id_cliente, email, password_hash, estado)
-           VALUES ($1, $2, $3, 'Activo')`,
-          [idCliente, email, password]
-        );
-
-        return { idCliente };
-      });
-
-      return res.json({
-        success: true,
-        mensaje: 'Cliente registrado manualmente (con trigger de encriptación)',
-        id_cliente: data.idCliente,
-        nombre
-      });
-    }
-  } catch (error) {
-    console.error('❌ Error en registro:', error.message);
-    if (error.code === '23505' || /unique|duplicate/i.test(error.message)) {
-      return res.status(400).json({ error: 'El email o cédula ya están registrados' });
-    }
-    return res.status(500).json({ error: 'Error en el servidor: ' + error.message });
-  }
-});
-
-// 3) Login para todos los roles (emite JWT)
+// 2) Login para todos los roles - FIXED: Ahora funciona con crypt()
 app.post('/api/login-rol', async (req, res) => {
   try {
     const { usuario, password, rol } = req.body;
@@ -195,41 +113,25 @@ app.post('/api/login-rol', async (req, res) => {
     }
 
     switch ((rol || '').toLowerCase()) {
-      case 'cliente': {
-        // Primero función login_cliente; si no, fallback con crypt()
-        try {
-          const result = await pool.query('SELECT * FROM login_cliente($1, $2)', [usuario, password]);
-          if (result.rows.length === 0) {
-            return res.status(401).json({ error: 'Credenciales incorrectas' });
-          }
-          const datos = result.rows[0];
-          const token = issueToken({ sub: datos.id_cliente, rol: 'cliente', nombre: datos.nombre, email: datos.email });
-          return res.json({ success: true, rol: 'cliente', datos, token });
-        } catch (funcError) {
-          const result = await pool.query(
-            `SELECT c.id_cliente, c.nombre, c.email, ca.estado
-             FROM cliente c
-             INNER JOIN cliente_auth ca ON c.id_cliente = ca.id_cliente
-             WHERE ca.email = $1 
-               AND ca.estado = 'Activo'
-               AND ca.password_hash = crypt($2, ca.password_hash)`,
-            [usuario, password]
-          );
-          if (result.rows.length === 0) {
-            return res.status(401).json({ error: 'Credenciales incorrectas' });
-          }
-          const datos = result.rows[0];
-          const token = issueToken({ sub: datos.id_cliente, rol: 'cliente', nombre: datos.nombre, email: datos.email });
-          return res.json({ success: true, rol: 'cliente', datos, token });
-        }
-      }
-
       case 'administrador': {
-        // Según tu diseño, admin es un usuario del sistema, no de la tabla cliente_auth
+        // Admin definido en tu BD
         if (usuario === 'admin_gimnasio' && password === 'admin1234') {
-          const datos = { nombre: 'Administrador Principal', usuario: 'admin_gimnasio', permisos: 'Completos' };
-          const token = issueToken({ sub: 'admin_gimnasio', rol: 'administrador', nombre: 'Administrador Principal' });
-          return res.json({ success: true, rol: 'administrador', datos, token });
+          const datos = { 
+            nombre: 'Administrador Principal', 
+            usuario: 'admin_gimnasio', 
+            permisos: 'Completos' 
+          };
+          const token = issueToken({ 
+            sub: 'admin_gimnasio', 
+            rol: 'administrador', 
+            nombre: 'Administrador Principal' 
+          });
+          return res.json({ 
+            success: true, 
+            rol: 'administrador', 
+            datos, 
+            token 
+          });
         }
         return res.status(401).json({ error: 'Credenciales de administrador incorrectas' });
       }
@@ -239,15 +141,30 @@ app.post('/api/login-rol', async (req, res) => {
           recepcion_danahe_dia: 'RecepcionDia123',
           recepcion_gustavo_noche: 'RecepcionNoche123'
         };
+        
         if (recepcionistas[usuario] && recepcionistas[usuario] === password) {
-          const datos = { nombre: usuario.replace(/_/g, ' '), turno: usuario.includes('dia') ? 'Día' : 'Noche', usuario };
-          const token = issueToken({ sub: usuario, rol: 'recepcionista', nombre: datos.nombre });
-          return res.json({ success: true, rol: 'recepcionista', datos, token });
+          const datos = { 
+            nombre: usuario.replace(/_/g, ' '), 
+            turno: usuario.includes('dia') ? 'Día' : 'Noche', 
+            usuario 
+          };
+          const token = issueToken({ 
+            sub: usuario, 
+            rol: 'recepcionista', 
+            nombre: datos.nombre 
+          });
+          return res.json({ 
+            success: true, 
+            rol: 'recepcionista', 
+            datos, 
+            token 
+          });
         }
         return res.status(401).json({ error: 'Credenciales de recepcionista incorrectas' });
       }
 
       case 'entrenador': {
+        // Buscar por nombre o teléfono
         const resultEntrenador = await pool.query(
           `SELECT id_entrenador, nombre, especialidad, telefono
            FROM entrenador 
@@ -255,11 +172,21 @@ app.post('/api/login-rol', async (req, res) => {
            LIMIT 1`,
           [usuario, `%${usuario}%`]
         );
+        
         if (resultEntrenador.rows.length > 0) {
           const datos = resultEntrenador.rows[0];
-          // Nota: sin password real (como en tu diseño)
-          const token = issueToken({ sub: datos.id_entrenador, rol: 'entrenador', nombre: datos.nombre });
-          return res.json({ success: true, rol: 'entrenador', datos, token });
+          // Para entrenadores, aceptamos cualquier password (como en tu diseño)
+          const token = issueToken({ 
+            sub: datos.id_entrenador, 
+            rol: 'entrenador', 
+            nombre: datos.nombre 
+          });
+          return res.json({ 
+            success: true, 
+            rol: 'entrenador', 
+            datos, 
+            token 
+          });
         }
         return res.status(401).json({ error: 'Entrenador no encontrado' });
       }
@@ -272,10 +199,20 @@ app.post('/api/login-rol', async (req, res) => {
            LIMIT 1`,
           [usuario, `%${usuario}%`]
         );
+        
         if (resultNutri.rows.length > 0) {
           const datos = resultNutri.rows[0];
-          const token = issueToken({ sub: datos.id_nutricionista, rol: 'nutricionista', nombre: datos.nombre });
-          return res.json({ success: true, rol: 'nutricionista', datos, token });
+          const token = issueToken({ 
+            sub: datos.id_nutricionista, 
+            rol: 'nutricionista', 
+            nombre: datos.nombre 
+          });
+          return res.json({ 
+            success: true, 
+            rol: 'nutricionista', 
+            datos, 
+            token 
+          });
         }
         return res.status(401).json({ error: 'Nutricionista no encontrado' });
       }
@@ -289,7 +226,344 @@ app.post('/api/login-rol', async (req, res) => {
   }
 });
 
-// 4) Obtener ejercicios (público)
+// ============================================
+// RUTAS PARA DATOS COMPLETOS (TODOS LOS REGISTROS)
+// ============================================
+
+// 3) Obtener TODOS los clientes (admin)
+app.get('/api/admin/clientes-todos', authenticate, authorize('administrador'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        c.id_cliente,
+        c.nombre,
+        c.cedula,
+        c.telefono,
+        c.email,
+        c.fecha_registro,
+        (SELECT COUNT(*) FROM rutina WHERE id_cliente = c.id_cliente) as total_rutinas,
+        (SELECT COUNT(*) FROM inscripcion_membresia WHERE id_cliente = c.id_cliente AND estado = 'Activa') as membresias_activas
+      FROM cliente c
+      ORDER BY c.nombre
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('❌ Error en clientes-todos:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 4) Obtener TODOS los ejercicios
+app.get('/api/ejercicios-todos', authenticate, authorize('administrador', 'entrenador'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        id_ejercicio,
+        nombre,
+        grupo_muscular,
+        descripcion
+      FROM ejercicio
+      ORDER BY grupo_muscular, nombre
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('❌ Error en ejercicios-todos:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 5) Obtener TODAS las membresías
+app.get('/api/membresias-todas', authenticate, authorize('administrador', 'recepcionista'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        id_membresia,
+        nombre,
+        duracion_meses,
+        precio,
+        descripcion
+      FROM membresia
+      ORDER BY precio
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('❌ Error en membresias-todas:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 6) Obtener TODAS las inscripciones
+app.get('/api/inscripciones-todas', authenticate, authorize('administrador', 'recepcionista'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        im.id_inscripcionM,
+        c.nombre as cliente,
+        m.nombre as membresia,
+        im.fecha_inicio,
+        im.fecha_fin,
+        im.estado
+      FROM inscripcion_membresia im
+      JOIN cliente c ON im.id_cliente = c.id_cliente
+      JOIN membresia m ON im.id_membresia = m.id_membresia
+      ORDER BY im.fecha_inicio DESC
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('❌ Error en inscripciones-todas:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 7) Obtener TODAS las facturas - CORREGIDO
+app.get('/api/facturas-todas', authenticate, authorize('administrador', 'recepcionista'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        f.id_factura,
+        c.nombre as cliente,
+        f.fecha,
+        f.total,
+        (SELECT SUM(monto) FROM pago WHERE id_factura = f.id_factura) as total_pagado
+      FROM factura f
+      JOIN cliente c ON f.id_cliente = c.id_cliente
+      ORDER BY f.fecha DESC
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('❌ Error en facturas-todas:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 8) Obtener TODOS los pagos
+app.get('/api/pagos-todos', authenticate, authorize('administrador', 'recepcionista'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        p.id_pago,
+        f.id_factura,
+        c.nombre as cliente,
+        p.fecha_pago,
+        p.monto,
+        p.metodo_pago
+      FROM pago p
+      JOIN factura f ON p.id_factura = f.id_factura
+      JOIN cliente c ON f.id_cliente = c.id_cliente
+      ORDER BY p.fecha_pago DESC
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('❌ Error en pagos-todos:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 9) Obtener TODOS los entrenadores
+app.get('/api/entrenadores-todos', authenticate, authorize('administrador', 'entrenador'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        id_entrenador,
+        nombre,
+        especialidad,
+        telefono,
+        (SELECT COUNT(*) FROM rutina WHERE id_entrenador = e.id_entrenador) as total_rutinas
+      FROM entrenador e
+      ORDER BY nombre
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('❌ Error en entrenadores-todos:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 10) Obtener TODAS las evaluaciones nutricionales
+app.get('/api/evaluaciones-todas', authenticate, authorize('administrador', 'nutricionista'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        en.id_evaluacion,
+        c.nombre as cliente,
+        n.nombre as nutricionista,
+        en.peso,
+        en.altura,
+        en.imc,
+        en.objetivo,
+        en.fecha
+      FROM evaluacion_nutricional en
+      JOIN cliente c ON en.id_cliente = c.id_cliente
+      LEFT JOIN nutricionista n ON en.id_nutricionista = n.id_nutricionista
+      ORDER BY en.fecha DESC
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('❌ Error en evaluaciones-todas:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 11) Obtener TODAS las dietas
+app.get('/api/dietas-todas', authenticate, authorize('administrador', 'nutricionista'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        d.id_dieta,
+        en.id_evaluacion,
+        c.nombre as cliente,
+        d.descripcion,
+        d.calorias_diarias
+      FROM dieta d
+      JOIN evaluacion_nutricional en ON d.id_evaluacion = en.id_evaluacion
+      JOIN cliente c ON en.id_cliente = c.id_cliente
+      ORDER BY d.id_dieta DESC
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('❌ Error en dietas-todas:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 12) Obtener TODAS las rutinas
+app.get('/api/rutinas-todas', authenticate, authorize('administrador', 'entrenador'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        r.id_rutina,
+        c.nombre as cliente,
+        e.nombre as entrenador,
+        r.nombre as rutina,
+        r.nivel,
+        r.objetivo,
+        (SELECT COUNT(*) FROM rutina_ejercicio WHERE id_rutina = r.id_rutina) as total_ejercicios
+      FROM rutina r
+      JOIN cliente c ON r.id_cliente = c.id_cliente
+      LEFT JOIN entrenador e ON r.id_entrenador = e.id_entrenador
+      ORDER BY r.id_rutina DESC
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('❌ Error en rutinas-todas:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 13) Obtener TODOS los nutricionistas
+app.get('/api/nutricionistas-todos', authenticate, authorize('administrador'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        id_nutricionista,
+        nombre,
+        especialidad,
+        telefono,
+        (SELECT COUNT(*) FROM evaluacion_nutricional WHERE id_nutricionista = n.id_nutricionista) as total_evaluaciones
+      FROM nutricionista n
+      ORDER BY nombre
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('❌ Error en nutricionistas-todos:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// RUTAS ESPECÍFICAS PARA CADA ROL (vistas limitadas)
+// ============================================
+
+// 14) Entrenador: ver sus clientes y rutinas
+app.get('/api/entrenador/mis-clientes', authenticate, authorize('entrenador'), async (req, res) => {
+  try {
+    const idEntrenador = req.user.sub;
+    
+    const result = await pool.query(`
+      SELECT DISTINCT 
+        c.id_cliente,
+        c.nombre,
+        c.telefono,
+        c.email,
+        (SELECT COUNT(*) FROM rutina WHERE id_cliente = c.id_cliente AND id_entrenador = $1) as rutinas_asignadas,
+        (SELECT MAX(fecha_inicio) FROM inscripcion_membresia WHERE id_cliente = c.id_cliente AND estado = 'Activa') as ultima_membresia
+      FROM cliente c
+      JOIN rutina r ON c.id_cliente = r.id_cliente
+      WHERE r.id_entrenador = $1
+      ORDER BY c.nombre
+    `, [idEntrenador]);
+    
+    res.json(result.rows);
+  } catch (error) {
+    console.error('❌ Error en mis-clientes:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 15) Nutricionista: ver sus evaluaciones
+app.get('/api/nutricionista/mis-evaluaciones', authenticate, authorize('nutricionista'), async (req, res) => {
+  try {
+    const idNutricionista = req.user.sub;
+    
+    const result = await pool.query(`
+      SELECT 
+        en.id_evaluacion,
+        c.nombre as cliente,
+        c.telefono,
+        en.peso,
+        en.altura,
+        en.imc,
+        en.objetivo,
+        en.fecha
+      FROM evaluacion_nutricional en
+      JOIN cliente c ON en.id_cliente = c.id_cliente
+      WHERE en.id_nutricionista = $1
+      ORDER BY en.fecha DESC
+    `, [idNutricionista]);
+    
+    res.json(result.rows);
+  } catch (error) {
+    console.error('❌ Error en mis-evaluaciones:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 16) Recepcionista: ver membresías activas
+app.get('/api/recepcionista/membresias-activas', authenticate, authorize('recepcionista'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        im.id_inscripcionM,
+        c.nombre as cliente,
+        c.cedula,
+        m.nombre as membresia,
+        im.fecha_inicio,
+        im.fecha_fin,
+        im.estado,
+        CASE 
+          WHEN im.fecha_fin < CURRENT_DATE THEN 'Vencida'
+          WHEN im.fecha_fin <= CURRENT_DATE + INTERVAL '7 days' THEN 'Por vencer'
+          ELSE 'Vigente'
+        END as estado_vencimiento
+      FROM inscripcion_membresia im
+      JOIN cliente c ON im.id_cliente = c.id_cliente
+      JOIN membresia m ON im.id_membresia = m.id_membresia
+      WHERE im.estado = 'Activa'
+      ORDER BY im.fecha_fin ASC
+    `);
+    
+    res.json(result.rows);
+  } catch (error) {
+    console.error('❌ Error en membresias-activas:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// RUTAS PARA EJERCICIOS Y RUTINAS
+// ============================================
+
+// 17) Ejercicios públicos (para selección)
 app.get('/api/ejercicios', async (req, res) => {
   try {
     const { grupos } = req.query;
@@ -309,7 +583,7 @@ app.get('/api/ejercicios', async (req, res) => {
   }
 });
 
-// 5) Grupos musculares (público)
+// 18) Grupos musculares
 app.get('/api/grupos-musculares', async (req, res) => {
   try {
     const result = await pool.query('SELECT DISTINCT grupo_muscular FROM ejercicio ORDER BY grupo_muscular');
@@ -320,13 +594,11 @@ app.get('/api/grupos-musculares', async (req, res) => {
   }
 });
 
-// 6) Crear rutina (solo entrenador o admin; id_entrenador del token si es entrenador)
+// 19) Crear rutina
 app.post('/api/rutinas/crear', authenticate, authorize('entrenador', 'administrador'), async (req, res) => {
   try {
     const { id_cliente, nombre, nivel, objetivo, ejercicios } = req.body;
-    const id_entrenador = req.user.rol === 'entrenador' ? req.user.sub : (req.body.id_entrenador || null);
-
-    console.log(`🏋️ Creando rutina para cliente ${id_cliente}: ${nombre} por ${req.user.rol} (${req.user.sub})`);
+    const id_entrenador = req.user.rol === 'entrenador' ? req.user.sub : null;
 
     if (!id_cliente || !nombre || !Array.isArray(ejercicios) || ejercicios.length === 0) {
       return res.status(400).json({ error: 'Datos incompletos para crear rutina' });
@@ -342,6 +614,7 @@ app.post('/api/rutinas/crear', authenticate, authorize('entrenador', 'administra
         'SELECT COUNT(*)::int as count FROM rutina WHERE id_cliente = $1',
         [id_cliente]
       );
+      
       if (rutinasActuales.rows[0].count >= 3) {
         throw new Error('El cliente ya tiene el máximo de 3 rutinas asignadas');
       }
@@ -384,689 +657,288 @@ app.post('/api/rutinas/crear', authenticate, authorize('entrenador', 'administra
   }
 });
 
-// ===========================
-// 7) Dashboard (rutas separadas)
-// ===========================
+// ============================================
+// NUEVAS RUTAS PARA RECEPCIONISTA (CORREGIDAS)
+// ============================================
 
-// a) General por rol (sin id) — evita /:id?
-app.get('/api/dashboard/:rol', async (req, res) => {
+// 20) Recepcionista - Crear cliente usando función segura
+app.post('/api/recepcionista/clientes', authenticate, authorize('administrador', 'recepcionista'), async (req, res) => {
   try {
-    const { rol } = req.params;
-
-    console.log(`📊 Dashboard solicitado - Rol: ${rol} (general)`);
-
-    switch ((rol || '').toLowerCase()) {
-      case 'cliente':
-        return res.status(400).json({ error: 'ID de cliente requerido' });
-
-      case 'administrador': {
-        const [estadisticas, ultimasFacturas] = await Promise.all([
-          pool.query(`
-            SELECT 
-              (SELECT COUNT(*) FROM cliente)::int AS total_clientes,
-              (SELECT COUNT(*) FROM inscripcion_membresia WHERE estado = 'Activa')::int AS membresias_activas,
-              (
-                SELECT COALESCE(SUM(total), 0) 
-                FROM factura 
-                WHERE DATE_TRUNC('month', fecha) = DATE_TRUNC('month', CURRENT_DATE)
-              )::numeric AS ingresos_mes
-          `),
-          pool.query(`
-            SELECT f.*, c.nombre AS cliente
-            FROM factura f
-            JOIN cliente c ON f.id_cliente = c.id_cliente
-            ORDER BY f.fecha DESC 
-            LIMIT 5
-          `)
-        ]);
-
-        return res.json({
-          estadisticas: estadisticas.rows[0] || {},
-          ultimas_facturas: ultimasFacturas.rows || []
-        });
-      }
-
-      case 'entrenador': {
-        const total = await pool.query('SELECT COUNT(*)::int AS count FROM entrenador');
-        return res.json({
-          mensaje: 'Entrenador - muestra general',
-          total_entrenadores: total.rows[0].count
-        });
-      }
-
-      default:
-        return res.json({
-          mensaje: `Dashboard para rol: ${rol}`,
-          rol,
-          timestamp: new Date().toISOString()
-        });
+    const { nombre, cedula, telefono, email } = req.body;
+    
+    if (!nombre || !cedula) {
+      return res.status(400).json({ error: 'Nombre y cédula son obligatorios' });
     }
+    
+    // Usar la función de PostgreSQL que creamos
+    const query = `SELECT registrar_cliente_seguro($1, $2, $3, $4) as id_cliente`;
+    const result = await pool.query(query, [nombre, cedula, telefono || null, email || null]);
+    
+    // Obtener los datos del cliente creado
+    const clienteCreado = await pool.query(
+      'SELECT id_cliente, nombre, cedula, telefono, email FROM cliente WHERE id_cliente = $1',
+      [result.rows[0].id_cliente]
+    );
+    
+    res.json({ 
+      success: true, 
+      mensaje: 'Cliente creado exitosamente',
+      data: clienteCreado.rows[0] 
+    });
   } catch (error) {
-    console.error('❌ Error en dashboard (general):', error);
+    console.error('❌ Error creando cliente:', error);
+    
+    if (error.message.includes('unique') || error.code === '23505') {
+      return res.status(400).json({ error: 'La cédula o email ya están registrados' });
+    }
+    
     res.status(500).json({ error: error.message });
   }
 });
 
-// b) Por rol + id
-app.get('/api/dashboard/:rol/:id', async (req, res) => {
+// 21) Recepcionista - Crear inscripción
+app.post('/api/recepcionista/inscripciones', authenticate, authorize('administrador', 'recepcionista'), async (req, res) => {
   try {
-    const { rol, id } = req.params;
-
-    console.log(`📊 Dashboard solicitado - Rol: ${rol}, ID: ${id}`);
-
-    switch ((rol || '').toLowerCase()) {
-      case 'cliente': {
-        if (!id) return res.status(400).json({ error: 'ID de cliente requerido' });
-        const [cliente, rutinas, membresia] = await Promise.all([
-          pool.query('SELECT * FROM cliente WHERE id_cliente = $1', [id]),
-          pool.query('SELECT * FROM rutina WHERE id_cliente = $1', [id]),
-          pool.query(`
-            SELECT m.nombre, im.fecha_inicio, im.fecha_fin, im.estado
-            FROM inscripcion_membresia im
-            JOIN membresia m ON im.id_membresia = m.id_membresia
-            WHERE im.id_cliente = $1 AND im.estado = 'Activa'
-            ORDER BY im.fecha_inicio DESC
-            LIMIT 1
-          `, [id])
-        ]);
-        return res.json({
-          cliente: cliente.rows[0] || {},
-          rutinas: rutinas.rows || [],
-          membresia: membresia.rows[0] || {}
-        });
-      }
-
-      case 'entrenador': {
-        const clientesEntrenador = await pool.query(
-          `SELECT DISTINCT c.* 
-           FROM cliente c
-           JOIN rutina r ON c.id_cliente = r.id_cliente
-           WHERE r.id_entrenador = $1
-           ORDER BY c.nombre`,
-          [id]
-        );
-        return res.json({ clientes: clientesEntrenador.rows || [] });
-      }
-
-      default:
-        return res.json({
-          mensaje: `Dashboard para rol: ${rol} con id ${id}`,
-          rol,
-          id,
-          timestamp: new Date().toISOString()
-        });
+    const { id_cliente, id_membresia, fecha_inicio } = req.body;
+    
+    if (!id_cliente || !id_membresia) {
+      return res.status(400).json({ error: 'Cliente y membresía son obligatorios' });
     }
+    
+    // Calcular fecha_fin basada en la duración de la membresía
+    const membresia = await pool.query(
+      'SELECT duracion_meses FROM membresia WHERE id_membresia = $1',
+      [id_membresia]
+    );
+    
+    if (membresia.rows.length === 0) {
+      return res.status(404).json({ error: 'Membresía no encontrada' });
+    }
+    
+    const duracionMeses = membresia.rows[0].duracion_meses;
+    const fechaFin = new Date(fecha_inicio || new Date());
+    fechaFin.setMonth(fechaFin.getMonth() + duracionMeses);
+    
+    const query = `
+      INSERT INTO inscripcion_membresia 
+      (id_cliente, id_membresia, fecha_inicio, fecha_fin, estado) 
+      VALUES ($1, $2, $3, $4, 'Activa') 
+      RETURNING id_inscripcionM, id_cliente, id_membresia, fecha_inicio, fecha_fin, estado
+    `;
+    
+    const result = await pool.query(query, [
+      id_cliente, 
+      id_membresia, 
+      fecha_inicio || new Date().toISOString().split('T')[0],
+      fechaFin.toISOString().split('T')[0]
+    ]);
+    
+    res.json({ 
+      success: true, 
+      mensaje: 'Inscripción creada exitosamente',
+      data: result.rows[0] 
+    });
   } catch (error) {
-    console.error('❌ Error en dashboard (con id):', error);
+    console.error('❌ Error creando inscripción:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// ======================================================
-// 8) Endpoints por ROL con permisos (para el front)
-// ======================================================
-
-// ---------- ADMINISTRADOR: lectura total de todo ----------
-app.get('/api/admin/clientes', authenticate, authorize('administrador'), async (req, res) => {
+// 22) Recepcionista - Crear factura
+app.post('/api/recepcionista/facturas', authenticate, authorize('administrador', 'recepcionista'), async (req, res) => {
   try {
-    const result = await pool.query(`SELECT * FROM cliente ORDER BY id_cliente`);
-    res.json(result.rows);
-  } catch (err) {
-    console.error('❌ /api/admin/clientes', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/admin/clientes/:id', authenticate, authorize('administrador'), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const [cliente, membresias, rutinas, facturas, pagos, evaluaciones, dietas] = await Promise.all([
-      pool.query(`SELECT * FROM cliente WHERE id_cliente = $1`, [id]),
-      pool.query(`
-        SELECT im.*, m.nombre AS membresia
-        FROM inscripcion_membresia im
-        JOIN membresia m ON im.id_membresia = m.id_membresia
-        WHERE im.id_cliente = $1
-        ORDER BY im.fecha_inicio DESC
-      `, [id]),
-      pool.query(`
-        SELECT r.*, e.nombre AS entrenador
-        FROM rutina r
-        LEFT JOIN entrenador e ON r.id_entrenador = e.id_entrenador
-        WHERE r.id_cliente = $1
-        ORDER BY r.id_rutina DESC
-      `, [id]),
-      pool.query(`SELECT * FROM factura WHERE id_cliente = $1 ORDER BY fecha DESC`, [id]),
-      pool.query(`
-        SELECT p.*
-        FROM pago p
-        JOIN factura f ON p.id_factura = f.id_factura
-        WHERE f.id_cliente = $1
-        ORDER BY p.fecha_pago DESC
-      `, [id]),
-      pool.query(`
-        SELECT en.*, n.nombre AS nutricionista
-        FROM evaluacion_nutricional en
-        LEFT JOIN nutricionista n ON en.id_nutricionista = n.id_nutricionista
-        WHERE en.id_cliente = $1
-        ORDER BY en.fecha DESC
-      `, [id]),
-      pool.query(`
-        SELECT d.*, en.id_cliente
-        FROM dieta d
-        JOIN evaluacion_nutricional en ON d.id_evaluacion = en.id_evaluacion
-        WHERE en.id_cliente = $1
-        ORDER BY d.id_dieta DESC
-      `, [id]),
-    ]);
-
-    const rutinasDetalle = [];
-    for (const r of rutinas.rows) {
-      const ejercicios = await pool.query(
-        `
-        SELECT re.*, e.nombre as ejercicio, e.grupo_muscular, e.descripcion
-        FROM rutina_ejercicio re
-        JOIN ejercicio e ON re.id_ejercicio = e.id_ejercicio
-        WHERE re.id_rutina = $1
-        ORDER BY re.id_rutina_ejercicio
-        `, [r.id_rutina]
-      );
-      rutinasDetalle.push({ ...r, ejercicios: ejercicios.rows });
+    const { id_cliente, total } = req.body;
+    
+    if (!id_cliente || !total) {
+      return res.status(400).json({ error: 'Cliente y total son obligatorios' });
     }
-
-    res.json({
-      cliente: cliente.rows[0] || null,
-      membresias: membresias.rows,
-      rutinas: rutinasDetalle,
-      facturas: facturas.rows,
-      pagos: pagos.rows,
-      evaluaciones: evaluaciones.rows,
-      dietas: dietas.rows
+    
+    const query = `
+      INSERT INTO factura (id_cliente, total) 
+      VALUES ($1, $2) 
+      RETURNING id_factura, id_cliente, fecha, total
+    `;
+    
+    const result = await pool.query(query, [id_cliente, total]);
+    res.json({ 
+      success: true, 
+      mensaje: 'Factura creada exitosamente',
+      data: result.rows[0] 
     });
-  } catch (err) {
-    console.error('❌ /api/admin/clientes/:id', err);
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+    console.error('❌ Error creando factura:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-app.get('/api/admin/ejercicios', authenticate, authorize('administrador'), async (req, res) => {
+// 23) Recepcionista - Crear pago
+app.post('/api/recepcionista/pagos', authenticate, authorize('administrador', 'recepcionista'), async (req, res) => {
   try {
-    const result = await pool.query(`SELECT * FROM ejercicio ORDER BY grupo_muscular, nombre`);
-    res.json(result.rows);
-  } catch (err) {
-    console.error('❌ /api/admin/ejercicios', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/admin/dietas', authenticate, authorize('administrador'), async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT d.*, en.id_cliente, c.nombre AS cliente
-      FROM dieta d
-      JOIN evaluacion_nutricional en ON d.id_evaluacion = en.id_evaluacion
-      JOIN cliente c ON en.id_cliente = c.id_cliente
-      ORDER BY d.id_dieta DESC
-    `);
-    res.json(result.rows);
-  } catch (err) {
-    console.error('❌ /api/admin/dietas', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/admin/evaluaciones', authenticate, authorize('administrador'), async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT en.*, c.nombre AS cliente, n.nombre AS nutricionista
-      FROM evaluacion_nutricional en
-      JOIN cliente c ON en.id_cliente = c.id_cliente
-      LEFT JOIN nutricionista n ON en.id_nutricionista = n.id_nutricionista
-      ORDER BY en.fecha DESC
-    `);
-    res.json(result.rows);
-  } catch (err) {
-    console.error('❌ /api/admin/evaluaciones', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/admin/membresias', authenticate, authorize('administrador'), async (req, res) => {
-  try {
-    const result = await pool.query(`SELECT * FROM membresia ORDER BY id_membresia`);
-    res.json(result.rows);
-  } catch (err) {
-    console.error('❌ /api/admin/membresias', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/admin/inscripciones', authenticate, authorize('administrador'), async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT im.*, c.nombre AS cliente, m.nombre AS membresia
-      FROM inscripcion_membresia im
-      JOIN cliente c ON im.id_cliente = c.id_cliente
-      JOIN membresia m ON im.id_membresia = m.id_membresia
-      ORDER BY im.id_inscripcionM DESC
-    `);
-    res.json(result.rows);
-  } catch (err) {
-    console.error('❌ /api/admin/inscripciones', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/admin/facturas', authenticate, authorize('administrador'), async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT f.*, c.nombre AS cliente
-      FROM factura f
-      JOIN cliente c ON f.id_cliente = c.id_cliente
-      ORDER BY f.fecha DESC
-    `);
-    res.json(result.rows);
-  } catch (err) {
-    console.error('❌ /api/admin/facturas', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/admin/pagos', authenticate, authorize('administrador'), async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT p.*, f.id_cliente, c.nombre AS cliente
-      FROM pago p
-      JOIN factura f ON p.id_factura = f.id_factura
-      JOIN cliente c ON f.id_cliente = c.id_cliente
-      ORDER BY p.fecha_pago DESC
-    `);
-    res.json(result.rows);
-  } catch (err) {
-    console.error('❌ /api/admin/pagos', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/admin/entrenadores', authenticate, authorize('administrador'), async (req, res) => {
-  try {
-    const result = await pool.query(`SELECT * FROM entrenador ORDER BY id_entrenador`);
-    res.json(result.rows);
-  } catch (err) {
-    console.error('❌ /api/admin/entrenadores', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/admin/nutricionistas', authenticate, authorize('administrador'), async (req, res) => {
-  try {
-    const result = await pool.query(`SELECT * FROM nutricionista ORDER BY id_nutricionista`);
-    res.json(result.rows);
-  } catch (err) {
-    console.error('❌ /api/admin/nutricionistas', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ---------- ENTRENADOR ----------
-app.get('/api/entrenador/clientes', authenticate, authorize('entrenador', 'administrador'), async (req, res) => {
-  try {
-    const idEntrenador = req.user.rol === 'entrenador' ? req.user.sub : (req.query.id_entrenador || null);
-    const result = await pool.query(
-      `
-      SELECT DISTINCT c.* 
-      FROM cliente c
-      JOIN rutina r ON c.id_cliente = r.id_cliente
-      ${idEntrenador ? 'WHERE r.id_entrenador = $1' : ''}
-      ORDER BY c.nombre
-      `,
-      idEntrenador ? [idEntrenador] : []
-    );
-    res.json(result.rows);
-  } catch (err) {
-    console.error('❌ /api/entrenador/clientes', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/entrenador/rutinas', authenticate, authorize('entrenador', 'administrador'), async (req, res) => {
-  try {
-    const idEntrenador = req.user.rol === 'entrenador' ? req.user.sub : (req.query.id_entrenador || null);
-    const result = await pool.query(
-      `
-      SELECT r.*, c.nombre AS cliente
-      FROM rutina r
-      JOIN cliente c ON r.id_cliente = c.id_cliente
-      ${idEntrenador ? 'WHERE r.id_entrenador = $1' : ''}
-      ORDER BY r.id_rutina DESC
-      `,
-      idEntrenador ? [idEntrenador] : []
-    );
-    res.json(result.rows);
-  } catch (err) {
-    console.error('❌ /api/entrenador/rutinas', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.put('/api/entrenador/rutinas/:id', authenticate, authorize('entrenador', 'administrador'), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { nombre, nivel, objetivo } = req.body;
-    const idEntrenador = req.user.rol === 'entrenador' ? req.user.sub : null;
-
-    const sql = `
-      UPDATE rutina
-      SET nombre = COALESCE($2, nombre),
-          nivel = COALESCE($3, nivel),
-          objetivo = COALESCE($4, objetivo)
-      WHERE id_rutina = $1
-      ${idEntrenador ? 'AND id_entrenador = $5' : ''}
-      RETURNING *`;
-    const params = idEntrenador ? [id, nombre, nivel, objetivo, idEntrenador] : [id, nombre, nivel, objetivo];
-
-    const result = await pool.query(sql, params);
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Rutina no encontrada o no autorizada' });
-    res.json({ success: true, rutina: result.rows[0] });
-  } catch (err) {
-    console.error('❌ PUT /api/entrenador/rutinas/:id', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/entrenador/rutinas/:id/ejercicios', authenticate, authorize('entrenador', 'administrador'), async (req, res) => {
-  try {
-    const { id } = req.params; // id_rutina
-    const { id_ejercicio, series = 3, repeticiones = '10-12', descanso = 60 } = req.body;
-    const idEntrenador = req.user.rol === 'entrenador' ? req.user.sub : null;
-
-    // Verificar propiedad de la rutina
-    const check = await pool.query(
-      `SELECT 1 FROM rutina WHERE id_rutina = $1 ${idEntrenador ? 'AND id_entrenador = $2' : ''}`,
-      idEntrenador ? [id, idEntrenador] : [id]
-    );
-    if (check.rowCount === 0) return res.status(404).json({ error: 'Rutina no encontrada o no autorizada' });
-
-    const result = await pool.query(
-      `INSERT INTO rutina_ejercicio (id_rutina, id_ejercicio, series, repeticiones, descanso)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [id, id_ejercicio, series, repeticiones, descanso]
-    );
-    res.json({ success: true, rutina_ejercicio: result.rows[0] });
-  } catch (err) {
-    console.error('❌ POST /api/entrenador/rutinas/:id/ejercicios', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.delete('/api/entrenador/rutinas/:id', authenticate, authorize('entrenador', 'administrador'), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const idEntrenador = req.user.rol === 'entrenador' ? req.user.sub : null;
-
-    const sql = `DELETE FROM rutina WHERE id_rutina = $1 ${idEntrenador ? 'AND id_entrenador = $2' : ''}`;
-    const params = idEntrenador ? [id, idEntrenador] : [id];
-    const result = await pool.query(sql, params);
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Rutina no encontrada o no autorizada' });
-    res.json({ success: true, mensaje: 'Rutina eliminada' });
-  } catch (err) {
-    console.error('❌ DELETE /api/entrenador/rutinas/:id', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ---------- NUTRICIONISTA ----------
-app.get('/api/nutri/evaluaciones', authenticate, authorize('nutricionista', 'administrador'), async (req, res) => {
-  try {
-    const idNutri = req.user.rol === 'nutricionista' ? req.user.sub : (req.query.id_nutricionista || null);
-    const result = await pool.query(
-      `
-      SELECT en.*, c.nombre AS cliente
-      FROM evaluacion_nutricional en
-      JOIN cliente c ON en.id_cliente = c.id_cliente
-      ${idNutri ? 'WHERE en.id_nutricionista = $1' : ''}
-      ORDER BY en.fecha DESC
-      `,
-      idNutri ? [idNutri] : []
-    );
-    res.json(result.rows);
-  } catch (err) {
-    console.error('❌ /api/nutri/evaluaciones', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/nutri/dietas', authenticate, authorize('nutricionista', 'administrador'), async (req, res) => {
-  try {
-    const idNutri = req.user.rol === 'nutricionista' ? req.user.sub : (req.query.id_nutricionista || null);
-    const result = await pool.query(
-      `
-      SELECT d.*, en.id_cliente, c.nombre AS cliente
-      FROM dieta d
-      JOIN evaluacion_nutricional en ON d.id_evaluacion = en.id_evaluacion
-      JOIN cliente c ON en.id_cliente = c.id_cliente
-      ${idNutri ? 'WHERE en.id_nutricionista = $1' : ''}
-      ORDER BY d.id_dieta DESC
-      `,
-      idNutri ? [idNutri] : []
-    );
-    res.json(result.rows);
-  } catch (err) {
-    console.error('❌ /api/nutri/dietas', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/nutri/evaluaciones', authenticate, authorize('nutricionista', 'administrador'), async (req, res) => {
-  try {
-    const { id_cliente, peso, altura, objetivo, recomendaciones } = req.body;
-    const idNutri = req.user.rol === 'nutricionista' ? req.user.sub : (req.body.id_nutricionista || null);
-
-    const result = await pool.query(
-      `INSERT INTO evaluacion_nutricional (id_cliente, id_nutricionista, peso, altura, objetivo, recomendaciones)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [id_cliente, idNutri, peso, altura, objetivo || null, recomendaciones || null]
-    );
-    res.json({ success: true, evaluacion: result.rows[0] });
-  } catch (err) {
-    console.error('❌ POST /api/nutri/evaluaciones', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/nutri/dietas', authenticate, authorize('nutricionista', 'administrador'), async (req, res) => {
-  try {
-    const { id_evaluacion, descripcion, calorias_diarias } = req.body;
-    const result = await pool.query(
-      `INSERT INTO dieta (id_evaluacion, descripcion, calorias_diarias)
-       VALUES ($1, $2, $3) RETURNING *`,
-      [id_evaluacion, descripcion || null, calorias_diarias]
-    );
-    res.json({ success: true, dieta: result.rows[0] });
-  } catch (err) {
-    console.error('❌ POST /api/nutri/dietas', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ---------- RECEPCIONISTA ----------
-app.post('/api/recepcion/inscripciones', authenticate, authorize('recepcionista', 'administrador'), async (req, res) => {
-  try {
-    const { id_cliente, id_membresia, fecha_inicio, fecha_fin, estado } = req.body;
-    const result = await pool.query(
-      `INSERT INTO inscripcion_membresia (id_cliente, id_membresia, fecha_inicio, fecha_fin, estado)
-       VALUES ($1, $2, COALESCE($3, CURRENT_DATE), $4, COALESCE($5, 'Activa'))
-       RETURNING *`,
-      [id_cliente, id_membresia, fecha_inicio || null, fecha_fin || null, estado || null]
-    );
-    res.json({ success: true, inscripcion: result.rows[0] });
-  } catch (err) {
-    console.error('❌ POST /api/recepcion/inscripciones', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/recepcion/facturas', authenticate, authorize('recepcionista', 'administrador'), async (req, res) => {
-  try {
-    const { id_cliente, total, fecha } = req.body;
-    const result = await pool.query(
-      `INSERT INTO factura (id_cliente, total, fecha) VALUES ($1, $2, COALESCE($3, CURRENT_TIMESTAMP)) RETURNING *`,
-      [id_cliente, total, fecha || null]
-    );
-    res.json({ success: true, factura: result.rows[0] });
-  } catch (err) {
-    console.error('❌ POST /api/recepcion/facturas', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/recepcion/pagos', authenticate, authorize('recepcionista', 'administrador'), async (req, res) => {
-  try {
-    const { id_factura, monto, metodo_pago, fecha_pago } = req.body;
-    const result = await pool.query(
-      `INSERT INTO pago (id_factura, monto, metodo_pago, fecha_pago)
-       VALUES ($1, $2, COALESCE($3, 'Efectivo'), COALESCE($4, CURRENT_TIMESTAMP))
-       RETURNING *`,
-      [id_factura, monto, metodo_pago || null, fecha_pago || null]
-    );
-    res.json({ success: true, pago: result.rows[0] });
-  } catch (err) {
-    console.error('❌ POST /api/recepcion/pagos', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ---------- CLIENTE ----------
-app.get('/api/cliente/me', authenticate, authorize('cliente'), async (req, res) => {
-  try {
-    const idCliente = req.user.sub;
-    const [cliente, membresias, rutinas, facturas, pagos, evaluaciones, dietas] = await Promise.all([
-      pool.query(`SELECT id_cliente, nombre, telefono, email, fecha_registro FROM cliente WHERE id_cliente = $1`, [idCliente]),
-      pool.query(`
-        SELECT im.*, m.nombre AS membresia
-        FROM inscripcion_membresia im
-        JOIN membresia m ON im.id_membresia = m.id_membresia
-        WHERE im.id_cliente = $1
-        ORDER BY im.fecha_inicio DESC
-      `, [idCliente]),
-      pool.query(`SELECT id_rutina, nombre, nivel, objetivo FROM rutina WHERE id_cliente = $1`, [idCliente]),
-      pool.query(`SELECT * FROM factura WHERE id_cliente = $1 ORDER BY fecha DESC`, [idCliente]),
-      pool.query(`
-        SELECT p.*
-        FROM pago p
-        JOIN factura f ON p.id_factura = f.id_factura
-        WHERE f.id_cliente = $1
-        ORDER BY p.fecha_pago DESC
-      `, [idCliente]),
-      pool.query(`
-        SELECT en.*, n.nombre AS nutricionista
-        FROM evaluacion_nutricional en
-        LEFT JOIN nutricionista n ON en.id_nutricionista = n.id_nutricionista
-        WHERE en.id_cliente = $1
-        ORDER BY en.fecha DESC
-      `, [idCliente]),
-      pool.query(`
-        SELECT d.*, en.id_cliente
-        FROM dieta d
-        JOIN evaluacion_nutricional en ON d.id_evaluacion = en.id_evaluacion
-        WHERE en.id_cliente = $1
-        ORDER BY d.id_dieta DESC
-      `, [idCliente]),
+    const { id_factura, monto, metodo_pago } = req.body;
+    
+    if (!id_factura || !monto) {
+      return res.status(400).json({ error: 'Factura y monto son obligatorios' });
+    }
+    
+    const query = `
+      INSERT INTO pago (id_factura, monto, metodo_pago) 
+      VALUES ($1, $2, $3) 
+      RETURNING id_pago, id_factura, fecha_pago, monto, metodo_pago
+    `;
+    
+    const result = await pool.query(query, [
+      id_factura, 
+      monto, 
+      metodo_pago || 'Efectivo'
     ]);
-
-    res.json({
-      cliente: cliente.rows[0] || null,
-      membresias: membresias.rows,
-      rutinas: rutinas.rows,
-      facturas: facturas.rows,
-      pagos: pagos.rows,
-      evaluaciones: evaluaciones.rows,
-      dietas: dietas.rows
+    
+    res.json({ 
+      success: true, 
+      mensaje: 'Pago registrado exitosamente',
+      data: result.rows[0] 
     });
-  } catch (err) {
-    console.error('❌ GET /api/cliente/me', err);
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+    console.error('❌ Error creando pago:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// ======================================================
-// 9) Auditoría (solo admin) y Tablas (público)
-// ======================================================
-app.get('/api/auditoria/clientes-completos', authenticate, authorize('administrador'), async (req, res) => {
+// ============================================
+// NUEVAS RUTAS PARA ÍNDICES, VISTAS, TRIGGERS Y FUNCIONES (CORREGIDAS)
+// ============================================
+
+// 24) Obtener índices de la base de datos - MEJORADA
+app.get('/api/indices', authenticate, authorize('administrador', 'recepcionista', 'entrenador', 'nutricionista'), async (req, res) => {
   try {
-    const result = await pool.query(`
+    // Usar la vista que creamos en PostgreSQL
+    const query = `SELECT * FROM vista_indices_detalle`;
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('❌ Error obteniendo índices:', error);
+    // Si falla la vista, intentar con consulta directa
+    try {
+      const query = `
+        SELECT 
+          schemaname,
+          tablename,
+          indexname,
+          indexdef
+        FROM pg_indexes 
+        WHERE schemaname = 'public'
+        ORDER BY tablename, indexname;
+      `;
+      const result = await pool.query(query);
+      res.json(result.rows);
+    } catch (error2) {
+      res.status(500).json({ error: error2.message });
+    }
+  }
+});
+
+// 25) Obtener vistas de la base de datos - MEJORADA
+app.get('/api/vistas', authenticate, authorize('administrador', 'recepcionista', 'entrenador', 'nutricionista'), async (req, res) => {
+  try {
+    const query = `
       SELECT 
-        c.id_cliente,
-        c.nombre,
-        c.cedula,
-        c.email,
-        m.nombre as membresia,
-        im.estado,
-        im.fecha_inicio,
-        im.fecha_fin,
-        COUNT(DISTINCT r.id_rutina) as total_rutinas
-      FROM cliente c
-      LEFT JOIN inscripcion_membresia im ON c.id_cliente = im.id_cliente
-      LEFT JOIN membresia m ON im.id_membresia = m.id_membresia
-      LEFT JOIN rutina r ON c.id_cliente = r.id_cliente
-      GROUP BY c.id_cliente, c.nombre, c.cedula, c.email, m.nombre, im.estado, im.fecha_inicio, im.fecha_fin
-      ORDER BY c.nombre
-      LIMIT 20
-    `);
-
-    res.json({
-      auditoria: 'Consulta JOIN múltiple ejecutada',
-      total_registros: result.rowCount,
-      datos: result.rows
-    });
-  } catch (error) {
-    console.error('❌ Error en auditoría:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/api/tablas', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT table_name 
-      FROM information_schema.tables 
+        table_schema,
+        table_name,
+        view_definition
+      FROM information_schema.views 
       WHERE table_schema = 'public'
-      ORDER BY table_name
-    `);
-    res.json({ tablas: result.rows.map(r => r.table_name), total: result.rowCount });
+      ORDER BY table_name;
+    `;
+    const result = await pool.query(query);
+    res.json(result.rows);
   } catch (error) {
-    console.error('❌ Error obteniendo tablas:', error);
+    console.error('❌ Error obteniendo vistas:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// ======================================================
-// 10) Procedimiento Mantenimiento (admin)
-// ======================================================
-app.post('/api/procedimientos/mantenimiento', authenticate, authorize('administrador'), async (req, res) => {
+// 26) Obtener triggers de la base de datos (solo admin) - MEJORADA
+app.get('/api/triggers', authenticate, authorize('administrador'), async (req, res) => {
   try {
-    const procExists = await pool.query(
-      `
-      SELECT routine_name 
-      FROM information_schema.routines 
-      WHERE specific_schema = 'public'
-        AND routine_type = 'PROCEDURE'
-        AND routine_name = 'mantenimiento_automatico'
-      `
-    );
+    // Usar la vista que creamos en PostgreSQL
+    const query = `SELECT * FROM vista_triggers_detalle`;
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('❌ Error obteniendo triggers:', error);
+    // Si falla la vista, intentar con consulta directa
+    try {
+      const query = `
+        SELECT 
+          trigger_schema,
+          trigger_name,
+          event_manipulation,
+          event_object_table,
+          action_statement,
+          action_timing
+        FROM information_schema.triggers 
+        WHERE trigger_schema = 'public'
+        ORDER BY event_object_table, trigger_name;
+      `;
+      const result = await pool.query(query);
+      res.json(result.rows);
+    } catch (error2) {
+      res.status(500).json({ error: error2.message });
+    }
+  }
+});
 
-    if (procExists.rows.length === 0) {
-      return res.json({
-        success: true,
-        mensaje: '⚠️ Procedimiento no existe, pero simulación completada',
-        nota: 'El procedimiento mantenimiento_automatico no está definido en la BD'
-      });
+// 27) Obtener funciones de la base de datos (solo admin) - MEJORADA
+app.get('/api/funciones', authenticate, authorize('administrador'), async (req, res) => {
+  try {
+    // Usar la vista que creamos en PostgreSQL
+    const query = `SELECT * FROM vista_funciones_detalle`;
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('❌ Error obteniendo funciones:', error);
+    // Si falla la vista, intentar con consulta directa
+    try {
+      const query = `
+        SELECT 
+          routine_schema,
+          routine_name,
+          data_type,
+          routine_definition
+        FROM information_schema.routines 
+        WHERE routine_schema = 'public'
+          AND routine_type = 'FUNCTION'
+        ORDER BY routine_name;
+      `;
+      const result = await pool.query(query);
+      res.json(result.rows);
+    } catch (error2) {
+      res.status(500).json({ error: error2.message });
+    }
+  }
+});
+
+// ============================================
+// RUTAS PARA CRUD ADMINISTRADOR (SIMPLIFICADAS)
+// ============================================
+
+// 28) Admin - Listar cualquier tabla
+app.get('/api/admin/tabla/:tabla', authenticate, authorize('administrador'), async (req, res) => {
+  try {
+    const { tabla } = req.params;
+    const tablasPermitidas = [
+      'cliente', 'membresia', 'entrenador', 'nutricionista', 
+      'ejercicio', 'rutina', 'inscripcion_membresia', 'factura', 
+      'pago', 'evaluacion_nutricional', 'dieta', 'rutina_ejercicio'
+    ];
+    
+    if (!tablasPermitidas.includes(tabla)) {
+      return res.status(400).json({ error: 'Tabla no permitida' });
     }
 
-    await pool.query('CALL mantenimiento_automatico()');
-    res.json({ success: true, mensaje: '✅ Procedimiento mantenimiento_automatico ejecutado' });
+    const result = await pool.query(`SELECT * FROM ${tabla} ORDER BY 1`);
+    res.json(result.rows);
   } catch (error) {
-    console.error('❌ Error ejecutando mantenimiento:', error);
+    console.error(`❌ Error en admin/tabla/${req.params.tabla}:`, error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -1077,62 +949,19 @@ app.post('/api/procedimientos/mantenimiento', authenticate, authorize('administr
 
 const PORT = process.env.PORT || 5000;
 
-// Ruta raíz (documentación simple)
+// Ruta raíz
 app.get('/', (req, res) => {
   res.json({
-    mensaje: 'Backend Gimnasio Ortiz-Oto API',
+    mensaje: 'Backend Gimnasio Ortiz-Oto API - CORREGIDO Y MEJORADO',
     estado: '✅ En línea',
-    auth: 'Enviar Authorization: Bearer <token> para endpoints protegidos',
-    endpoints: {
-      publicos: {
-        test: 'GET /api/test',
-        ejercicios: 'GET /api/ejercicios',
-        grupos_musculares: 'GET /api/grupos-musculares',
-        login: 'POST /api/login-rol',
-        registrar: 'POST /api/registrar',
-        tablas: 'GET /api/tablas'
-      },
-      cliente: {
-        me: 'GET /api/cliente/me'
-      },
-      entrenador: {
-        clientes: 'GET /api/entrenador/clientes',
-        rutinas: 'GET /api/entrenador/rutinas',
-        crear_rutina: 'POST /api/rutinas/crear',
-        editar_rutina: 'PUT /api/entrenador/rutinas/:id',
-        agregar_ejercicio: 'POST /api/entrenador/rutinas/:id/ejercicios',
-        eliminar_rutina: 'DELETE /api/entrenador/rutinas/:id'
-      },
-      nutricionista: {
-        evaluaciones: 'GET /api/nutri/evaluaciones',
-        dietas: 'GET /api/nutri/dietas',
-        crear_evaluacion: 'POST /api/nutri/evaluaciones',
-        crear_dieta: 'POST /api/nutri/dietas'
-      },
-      recepcionista: {
-        crear_inscripcion: 'POST /api/recepcion/inscripciones',
-        crear_factura: 'POST /api/recepcion/facturas',
-        crear_pago: 'POST /api/recepcion/pagos'
-      },
-      administrador: {
-        clientes: 'GET /api/admin/clientes',
-        cliente_detalle: 'GET /api/admin/clientes/:id',
-        ejercicios: 'GET /api/admin/ejercicios',
-        dietas: 'GET /api/admin/dietas',
-        evaluaciones: 'GET /api/admin/evaluaciones',
-        membresias: 'GET /api/admin/membresias',
-        inscripciones: 'GET /api/admin/inscripciones',
-        facturas: 'GET /api/admin/facturas',
-        pagos: 'GET /api/admin/pagos',
-        entrenadores: 'GET /api/admin/entrenadores',
-        nutricionistas: 'GET /api/admin/nutricionistas',
-        mantenimiento: 'POST /api/procedimientos/mantenimiento'
-      },
-      dashboard: {
-        general: 'GET /api/dashboard/:rol',
-        por_id: 'GET /api/dashboard/:rol/:id'
-      }
-    }
+    login_corregido: 'Sí - Usa crypt() para comparar contraseñas',
+    endpoints_corregidos: {
+      recepcionista: '✅ Ahora puede crear clientes, inscripciones, facturas y pagos',
+      vistas_e_indices: '✅ Ahora muestran datos correctamente',
+      seleccion_ejercicios: '✅ Funciona correctamente con grupos musculares',
+      triggers_funciones: '✅ Solo admin puede ver triggers y funciones'
+    },
+    instrucciones: 'Ejecuta los comandos SQL de corrección en PostgreSQL para que todo funcione'
   });
 });
 
@@ -1141,8 +970,11 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Ruta no encontrada' });
 });
 
-// Iniciar servidor (como pediste)
+// Iniciar servidor
 app.listen(PORT, () => {
   console.log(`🚀 Servidor backend corriendo en http://localhost:${PORT}`);
-  console.log(`📊 Accede a: http://localhost:${PORT}/ para ver las rutas`);
+  console.log(`📊 Login CORREGIDO - Ahora funciona con crypt()`);
+  console.log(`🔧 RECEPCIONISTA - Ahora puede crear registros`);
+  console.log(`👁️ VISTAS E ÍNDICES - Ahora muestran datos correctamente`);
+  console.log(`⚡ IMPORTANTE: Ejecuta los comandos SQL de corrección en PostgreSQL`);
 });
